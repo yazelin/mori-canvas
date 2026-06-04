@@ -277,6 +277,33 @@ async function applyPlan(
 	const E = existingIds.length
 	let drawn = 0
 	try {
+		// First apply edits/removals the agent decided on (e.g. a decision was
+		// overturned, a todo got done) — keeps a long meeting board from only growing.
+		if (plan.updates?.length || plan.deletes?.length) {
+			room.doc.transact(() => {
+				for (const u of plan.updates || []) {
+					const id = existingIds[u.index]
+					const cur = id ? (shapes.get(id) as any) : undefined
+					if (cur) {
+						shapes.set(id, {
+							...cur,
+							...(u.text !== undefined ? { text: u.text } : {}),
+							...(u.color !== undefined ? { color: u.color } : {}),
+						})
+					}
+				}
+				for (const idx of plan.deletes || []) {
+					const id = existingIds[idx]
+					if (id && shapes.has(id)) {
+						shapes.delete(id)
+						for (const [cid, c] of connectors) if ((c as any).from === id || (c as any).to === id) connectors.delete(cid)
+					}
+				}
+			})
+			if (plan.updates?.length || plan.deletes?.length)
+				console.log(`[agent] ~${plan.updates?.length || 0} updates, -${plan.deletes?.length || 0} deletes in "${roomName}"`)
+		}
+
 		// Stream the stickies in one-by-one, moving Mori's live cursor to each so
 		// every connected human sees Mori actually drawing. The grid slot is read
 		// from the LIVE shapes.size inside the transact, so concurrent writes can't

@@ -6,7 +6,13 @@
 import { chat } from './llm.ts'
 
 export type StickyPlan = { text: string; color: string; kind?: string }
-export type BoardPlan = { stickies: StickyPlan[]; connectors: [number, number][] }
+export type StickyUpdate = { index: number; text?: string; color?: string }
+export type BoardPlan = {
+	stickies: StickyPlan[]
+	connectors: [number, number][]
+	updates: StickyUpdate[] // edit existing cards (by their index in the shown list)
+	deletes: number[] // remove existing cards (by index)
+}
 
 const COLOR_BY_KIND: Record<string, string> = {
 	topic: 'yellow',
@@ -35,6 +41,14 @@ const SYSTEM = `你是會議白板助手。給你一段會議逐字稿,把重點
 - stickies 只輸出「這段逐字稿帶出的、清單裡還沒有的新重點」,不要重列已有的;若這段沒有任何新東西,stickies 給 []。
 - 索引是延續的:已有便利貼用清單上的索引,你新增的便利貼從清單長度開始接續編號。
 - connectors 的 from/to 可以指向已有索引,也可以指向你新增的索引(把新重點接到相關的舊便利貼上)。
+- 若逐字稿明確表示某張既有便利貼「被推翻 / 已完成 / 講錯了 / 改了」,才動它(否則絕不碰既有卡):
+  - "updates": [ { "index": <既有索引>, "text": "<新文字>", "kind": "..." } ] 改既有卡的文字或分類。
+  - "deletes": [ <既有索引> ] 移除既有卡(例如待辦已完成、決議取消)。
+  - updates/deletes 的 index 只能是「目前白板已有的便利貼」清單索引(0..清單長度-1),不要動到你這次新增的。保守使用,不確定就別動。
+  - 待辦完成時:優先用 updates 把那張既有待辦的文字改成「✓ …」,或用 deletes 移除它;**不要**另外新增一張「完成」卡。決議被取代時:用 updates 把舊決議改成新內容,不要兩張並存。
+
+完整格式(updates/deletes 可省略):
+{ "stickies":[...], "connectors":[...], "updates":[{"index":0,"text":"新文字","kind":"decision"}], "deletes":[2] }
 
 範例(空白白板):
 {"stickies":[{"text":"線上預約系統","kind":"topic"},{"text":"重複預約問題","kind":"risk"},{"text":"製作教學影片","kind":"todo"}],"connectors":[{"from":0,"to":1},{"from":0,"to":2}]}`
@@ -54,7 +68,7 @@ function parseLenient(raw: string, existingCount = 0): BoardPlan {
 	} catch {
 		// model returned unparseable output (truncated / prose) — degrade to "nothing new"
 		console.warn('[agent] could not parse model output; treating as empty plan')
-		return { stickies: [], connectors: [] }
+		return { stickies: [], connectors: [], updates: [], deletes: [] }
 	}
 	const stickies: StickyPlan[] = (Array.isArray(obj.stickies) ? obj.stickies : [])
 		.slice(0, 8)
@@ -79,7 +93,20 @@ function parseLenient(raw: string, existingCount = 0): BoardPlan {
 			([a, b]) =>
 				Number.isInteger(a) && Number.isInteger(b) && a >= 0 && b >= 0 && a < total && b < total && a !== b
 		)
-	return { stickies, connectors }
+	const updates: StickyUpdate[] = (Array.isArray(obj.updates) ? obj.updates : [])
+		.map((u: any) => ({
+			index: toIdx(u?.index),
+			text: typeof u?.text === 'string' && u.text.trim() ? u.text.slice(0, 40) : undefined,
+			color: COLOR_BY_KIND[u?.kind] ?? (typeof u?.color === 'string' ? u.color : undefined),
+		}))
+		.filter(
+			(u: StickyUpdate) =>
+				Number.isInteger(u.index) && u.index >= 0 && u.index < existingCount && (u.text !== undefined || u.color !== undefined)
+		)
+	const deletes: number[] = (Array.isArray(obj.deletes) ? obj.deletes : [])
+		.map(toIdx)
+		.filter((i: number) => Number.isInteger(i) && i >= 0 && i < existingCount)
+	return { stickies, connectors, updates, deletes }
 }
 
 /**
