@@ -17,11 +17,19 @@ type Sticky = {
 type Connector = { id: string; from: string; to: string }
 
 const COLORS: Record<string, string> = {
-	yellow: '#ffd96b',
-	green: '#7ed09e',
-	red: '#f08c8c',
-	blue: '#6ba8e8',
+	yellow: '#f3cf6b', // topic
+	green: '#a6d6a1', // todo
+	blue: '#9cbce8', // decision
+	red: '#edaaa3', // risk
 }
+// a darker tint of each, for the little "kind" accent dot on a card
+const KIND_ACCENT: Record<string, string> = {
+	yellow: '#b88a18',
+	green: '#4e9a5c',
+	blue: '#4a72b8',
+	red: '#c46a61',
+}
+const CANVAS_FONT = "'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', system-ui, sans-serif"
 // Same-origin: the API and the sync websocket both go through Vite's reverse
 // proxy, so this works over http OR https (and behind a tunnel) with no hardcoded
 // port. ws upgrades to wss automatically when the page is served over https.
@@ -48,6 +56,18 @@ function resolveRoom(): string {
 		history.replaceState(null, '', location.pathname + '?' + p.toString())
 	}
 	return r
+}
+
+const ACCENT = '#b4530a'
+// lighten a #rrggbb toward white (for the soft top of the sticky gradient)
+function lighten(hex: string, amt = 0.16): string {
+	const m = /^#?([0-9a-f]{6})$/i.exec(hex)
+	if (!m) return hex
+	const n = parseInt(m[1], 16)
+	const r = Math.min(255, ((n >> 16) & 255) + Math.round(255 * amt))
+	const g = Math.min(255, ((n >> 8) & 255) + Math.round(255 * amt))
+	const b = Math.min(255, (n & 255) + Math.round(255 * amt))
+	return `rgb(${r},${g},${b})`
 }
 
 // where the center->target line exits a w×h rectangle centred at (cx,cy)
@@ -240,6 +260,12 @@ export default function App() {
 	useEffect(() => {
 		if (editing) editRef.current?.focus()
 	}, [editing])
+
+	// re-render once the web fonts load so Konva re-measures canvas text crisply
+	const [, setFontReady] = useState(false)
+	useEffect(() => {
+		;(document as any).fonts?.ready.then(() => setFontReady(true))
+	}, [])
 
 	useEffect(() => {
 		if (!shareOpen) return
@@ -509,21 +535,16 @@ export default function App() {
 	}
 
 	const mobile = size.w < 700
-	const btn: React.CSSProperties = {
-		font: '13px system-ui',
-		padding: mobile ? '8px 12px' : '5px 10px',
-		cursor: 'pointer',
-		borderRadius: 6,
-		border: '1px solid #ccc',
-		background: '#fff',
-	}
+	// bare <button> is styled globally (index.html); keep this empty so variant
+	// overrides (background, width…) layer on top cleanly.
+	const btn: React.CSSProperties = {}
 
 	// exposed for verification / console poking
 	;(window as any).__wb = { addSticky, patchShape, deleteSticky, addConnector, clearAll }
 	;(window as any).__cursors = cursors
 
 	return (
-		<div style={{ position: 'fixed', inset: 0, background: '#fafafa' }}>
+		<div className="board-bg" style={{ position: 'fixed', inset: 0 }}>
 			<Stage
 				ref={stageRef}
 				width={size.w}
@@ -569,12 +590,13 @@ export default function App() {
 							<Arrow
 								key={c.id}
 								points={[x1, y1, x2, y2]}
-								stroke={sel ? '#2563eb' : '#555'}
-								fill={sel ? '#2563eb' : '#555'}
-								strokeWidth={sel ? 4 : 2}
+								stroke={sel ? ACCENT : 'rgba(28,26,23,0.4)'}
+								fill={sel ? ACCENT : 'rgba(28,26,23,0.4)'}
+								strokeWidth={sel ? 3.5 : 2}
 								hitStrokeWidth={16}
-								pointerLength={9}
-								pointerWidth={9}
+								pointerLength={10}
+								pointerWidth={10}
+								tension={0}
 								onClick={() => {
 									setSelectedConnId(c.id)
 									setSelectedId(null)
@@ -613,28 +635,37 @@ export default function App() {
 								<Rect
 									width={s.w}
 									height={s.h}
-									fill={COLORS[s.color] ?? s.color}
-									cornerRadius={8}
-									shadowColor="black"
-									shadowOpacity={0.2}
-									shadowBlur={10}
-									shadowOffsetY={4}
-									stroke={pending ? '#2563eb' : selected ? '#111' : undefined}
-									strokeWidth={pending ? 4 : selected ? 2 : 0}
+									cornerRadius={16}
+									fillLinearGradientStartPoint={{ x: 0, y: 0 }}
+									fillLinearGradientEndPoint={{ x: 0, y: s.h }}
+									fillLinearGradientColorStops={[0, lighten(COLORS[s.color] ?? s.color), 1, COLORS[s.color] ?? s.color]}
+									shadowColor="#1c1a17"
+									shadowOpacity={selected ? 0.28 : 0.17}
+									shadowBlur={selected ? 26 : 18}
+									shadowOffsetY={selected ? 12 : 8}
+									stroke={pending ? ACCENT : selected ? '#1c1a17' : 'rgba(255,255,255,0.45)'}
+									strokeWidth={pending ? 3 : selected ? 2 : 1}
 								/>
+								{/* kind accent dot */}
+								<Circle x={18} y={18} radius={5} fill={KIND_ACCENT[s.color] ?? '#1c1a17'} opacity={0.8} />
 								<Text
 									text={s.text}
 									width={s.w}
 									height={s.h}
-									padding={16}
-									fontSize={20}
-									fontFamily="system-ui, sans-serif"
-									fill="#111"
+									padding={20}
+									fontSize={19}
+									lineHeight={1.25}
+									fontFamily={CANVAS_FONT}
+									fontStyle="500"
+									fill="#1f1c18"
 									align="center"
 									verticalAlign="middle"
 								/>
 								{s.drawnBy && s.drawnBy !== 'user' && (
-									<Text text={s.drawnBy} x={10} y={s.h - 19} fontSize={11} fill="rgba(0,0,0,0.5)" />
+									<>
+										<Rect x={14} y={s.h - 26} width={Math.min(s.drawnBy.length * 12 + 16, s.w - 28)} height={18} cornerRadius={9} fill="rgba(28,26,23,0.12)" />
+										<Text x={22} y={s.h - 23} text={s.drawnBy} fontSize={11} fontFamily={CANVAS_FONT} fill="rgba(28,26,23,0.62)" />
+									</>
 								)}
 							</Group>
 						)
@@ -642,13 +673,48 @@ export default function App() {
 					{/* live cursors of everyone else (Mori + other humans) */}
 					{cursors.map((c) => (
 						<Group key={c.id} x={c.x} y={c.y} listening={false}>
-							<Circle radius={6} fill={c.color} stroke="#fff" strokeWidth={1.5} />
-							<Rect x={10} y={-9} width={c.name.length * 8 + 12} height={18} cornerRadius={4} fill={c.color} />
-							<Text x={16} y={-6} text={c.name} fontSize={12} fontStyle="bold" fill="#fff" />
+							<Circle radius={7} fill={c.color} stroke="#fff" strokeWidth={2} shadowColor="#1c1a17" shadowOpacity={0.25} shadowBlur={6} shadowOffsetY={2} />
+							<Rect
+								x={11}
+								y={-10}
+								width={c.name.length * 8.5 + 16}
+								height={20}
+								cornerRadius={10}
+								fill={c.color}
+								shadowColor="#1c1a17"
+								shadowOpacity={0.2}
+								shadowBlur={6}
+								shadowOffsetY={2}
+							/>
+							<Text x={19} y={-6} text={c.name} fontSize={12} fontFamily={CANVAS_FONT} fontStyle="600" fill="#fff" />
 						</Group>
 					))}
 				</Layer>
 			</Stage>
+
+			{/* elegant empty state */}
+			{shapes.length === 0 && (
+				<div
+					style={{
+						position: 'fixed',
+						inset: 0,
+						display: 'flex',
+						flexDirection: 'column',
+						alignItems: 'center',
+						justifyContent: 'center',
+						pointerEvents: 'none',
+						zIndex: 1,
+						textAlign: 'center',
+						gap: 8,
+					}}
+				>
+					<div className="code" style={{ fontSize: 38, color: 'var(--ink)', opacity: 0.9 }}>共筆白板</div>
+					<div style={{ fontSize: 15, color: 'var(--ink-soft)' }}>按左下「● 開始會議記錄」,邊講邊整理上板</div>
+					<div style={{ fontSize: 13, color: 'var(--ink-soft)', opacity: 0.75 }}>
+						或雙擊空白新增便利貼 · 右上「分享 / QR」拉人進來
+					</div>
+				</div>
+			)}
 
 			{/* text editor overlay */}
 			{editing &&
@@ -693,9 +759,10 @@ export default function App() {
 				})()}
 
 			{/* top toolbar */}
-			<div style={bar}>
-				<strong>房號:</strong> {room}
-				<button style={{ ...btn, background: '#dbeafe' }} onClick={() => setShareOpen(true)}>
+			<div className="glass float-in" style={bar}>
+				<span style={{ color: 'var(--ink-soft)', fontSize: 12 }}>房號</span>
+				<span className="code" style={{ fontSize: 19, color: 'var(--accent)', marginRight: 2 }}>{room}</span>
+				<button style={{ background: 'var(--accent)', color: '#fff', borderColor: 'var(--accent)' }} onClick={() => setShareOpen(true)}>
 					分享 / QR
 				</button>
 				<span style={{ color: '#888' }}>{status}</span>
@@ -760,7 +827,7 @@ export default function App() {
 			)}
 
 			{/* agent / voice panel (collapsible; record stays visible) */}
-			<div style={{ ...panel, width: mobile ? 'min(86vw, 320px)' : 320, left: mobile ? 8 : 12 }}>
+			<div className="glass float-in" style={{ ...panel, width: mobile ? 'min(86vw, 320px)' : 320, left: mobile ? 8 : 14 }}>
 				<div
 					onClick={() => setPanelOpen((o) => !o)}
 					style={{ fontWeight: 600, cursor: 'pointer', userSelect: 'none' }}
@@ -781,14 +848,16 @@ export default function App() {
 					</>
 				)}
 				<button
+					className={meeting ? 'live' : undefined}
 					style={{
-						...btn,
 						width: '100%',
 						marginTop: 8,
 						fontSize: 15,
-						padding: '11px',
-						background: meeting ? '#fecaca' : '#dcfce7',
+						padding: '12px',
 						fontWeight: 600,
+						background: meeting ? 'var(--live)' : 'var(--ink)',
+						color: '#fff',
+						borderColor: meeting ? 'var(--live)' : 'var(--ink)',
 					}}
 					onClick={() => (meeting ? stopMeeting() : startMeeting())}
 				>
@@ -820,14 +889,14 @@ export default function App() {
 					}}
 				>
 					<div
-						onClick={(e) => e.stopPropagation()}
+						className="modal-in" onClick={(e) => e.stopPropagation()}
 						style={{
-							background: '#fff',
-							borderRadius: 12,
+							background: 'rgba(253,251,247,0.98)',
+							borderRadius: 18,
 							padding: 24,
 							width: 320,
 							textAlign: 'center',
-							boxShadow: '0 8px 30px rgba(0,0,0,0.3)',
+							boxShadow: '0 24px 60px -20px rgba(28,26,23,0.45)',
 						}}
 					>
 						<div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 12 }}>
@@ -840,7 +909,7 @@ export default function App() {
 							/>
 						</div>
 						<div style={{ color: '#666', fontSize: 13 }}>用手機掃 QR,或輸入房號加入</div>
-						<div style={{ fontSize: 40, fontWeight: 700, letterSpacing: 4, margin: '8px 0 14px' }}>{room}</div>
+						<div className="code" style={{ fontSize: 52, color: 'var(--accent)', margin: '6px 0 16px', lineHeight: 1 }}>{room}</div>
 						{qrUrl ? (
 							<img src={qrUrl} width={240} height={240} alt="QR" style={{ border: '1px solid #eee', borderRadius: 8 }} />
 						) : (
@@ -908,46 +977,36 @@ export default function App() {
 	)
 }
 
+// these get className="glass" for the frosted look; consts hold position/layout only
 const bar: React.CSSProperties = {
 	position: 'fixed',
-	top: 8,
+	top: 14,
 	left: '50%',
 	transform: 'translateX(-50%)',
 	zIndex: 1000,
 	display: 'flex',
 	flexWrap: 'wrap',
 	justifyContent: 'center',
-	maxWidth: '96vw',
+	maxWidth: '94vw',
 	gap: 6,
 	alignItems: 'center',
-	background: 'rgba(255,255,255,0.94)',
-	border: '1px solid #ddd',
-	borderRadius: 8,
-	padding: '6px 10px',
-	font: '13px system-ui, sans-serif',
-	boxShadow: '0 1px 4px rgba(0,0,0,0.12)',
+	padding: '7px 12px',
+	fontSize: 13,
 }
 const hint: React.CSSProperties = {
 	position: 'fixed',
-	bottom: 8,
+	bottom: 10,
 	left: '50%',
 	transform: 'translateX(-50%)',
 	zIndex: 1000,
-	color: '#999',
-	font: '12px system-ui',
-	background: 'rgba(255,255,255,0.7)',
-	padding: '2px 8px',
-	borderRadius: 6,
+	color: 'var(--ink-soft)',
+	fontSize: 12,
 }
 const panel: React.CSSProperties = {
 	position: 'fixed',
-	left: 12,
-	bottom: 36,
+	left: 14,
+	bottom: 38,
 	zIndex: 1000,
-	background: 'rgba(255,255,255,0.96)',
-	border: '1px solid #ddd',
-	borderRadius: 8,
-	padding: 10,
-	boxShadow: '0 1px 4px rgba(0,0,0,0.12)',
-	font: '13px system-ui, sans-serif',
+	padding: 12,
+	fontSize: 13,
 }
