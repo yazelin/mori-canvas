@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Stage, Layer, Group, Rect, Text, Arrow, Circle } from 'react-konva'
 import * as Y from 'yjs'
 import { WebsocketProvider } from 'y-websocket'
+import QRCode from 'qrcode'
 
 type Sticky = {
 	id: string
@@ -30,6 +31,25 @@ const SYNC_WS = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.h
 const DEMO_TRANSCRIPT =
 	'今天跟客戶開會討論線上預約系統。客戶現在用紙本登記,常常重複預約,想要病患自己選時段。我們報季繳方案。客戶擔心櫃台人員不會用後台,我說會做教學影片。風險是診所內網要先確認能不能對外。下一步我這邊下週三前先給一個 demo。'
 
+// short, human-readable room code (no ambiguous chars). Doubles as the "房號".
+const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+function genCode(n = 4): string {
+	let s = ''
+	for (let i = 0; i < n; i++) s += CODE_ALPHABET[Math.floor(Math.random() * CODE_ALPHABET.length)]
+	return s
+}
+// use ?room= if present; otherwise mint a fresh code and put it in the URL (shareable)
+function resolveRoom(): string {
+	const p = new URLSearchParams(location.search)
+	let r = p.get('room')
+	if (!r) {
+		r = genCode()
+		p.set('room', r)
+		history.replaceState(null, '', location.pathname + '?' + p.toString())
+	}
+	return r
+}
+
 // where the center->target line exits a w×h rectangle centred at (cx,cy)
 function edgePoint(cx: number, cy: number, hw: number, hh: number, tx: number, ty: number): [number, number] {
 	const dx = tx - cx
@@ -40,7 +60,19 @@ function edgePoint(cx: number, cy: number, hw: number, hh: number, tx: number, t
 }
 
 export default function App() {
-	const room = new URLSearchParams(location.search).get('room') ?? 'spike'
+	const [room] = useState(resolveRoom)
+	const [lanIp, setLanIp] = useState('')
+	useEffect(() => {
+		// ask the server for its LAN IP so the share URL is reachable from other
+		// devices (localhost would point a phone at itself)
+		fetch('/api/lan')
+			.then((r) => r.json())
+			.then((d) => d.ip && setLanIp(d.ip))
+			.catch(() => {})
+	}, [])
+	const isLocalHostPage = ['localhost', '127.0.0.1', '::1', ''].includes(location.hostname)
+	const shareHost = isLocalHostPage && lanIp ? lanIp : location.hostname
+	const shareUrl = `${location.protocol}//${shareHost}${location.port ? ':' + location.port : ''}${location.pathname}?room=${encodeURIComponent(room)}`
 
 	const { doc, yShapes, yConnectors, provider, undoMgr, LOCAL } = useMemo(() => {
 		const doc = new Y.Doc()
@@ -69,6 +101,9 @@ export default function App() {
 	const editRef = useRef<HTMLTextAreaElement>(null)
 	const stageRef = useRef<any>(null)
 	const dragTs = useRef(0)
+	const [shareOpen, setShareOpen] = useState(false)
+	const [qrUrl, setQrUrl] = useState('')
+	const [joinCode, setJoinCode] = useState('')
 
 	// presence: my identity + everyone else's live cursors (Mori included)
 	const me = useMemo(
@@ -110,6 +145,10 @@ export default function App() {
 
 	function exportMd() {
 		window.open(`${SYNC_HTTP}/api/export/${encodeURIComponent(room)}`, '_blank')
+	}
+	function joinRoom() {
+		const c = joinCode.trim().toUpperCase()
+		if (c && c !== room) location.href = `${location.pathname}?room=${encodeURIComponent(c)}`
 	}
 	function exportPng() {
 		const uri = stageRef.current?.toDataURL({ pixelRatio: 2 })
@@ -195,6 +234,11 @@ export default function App() {
 	useEffect(() => {
 		if (editing) editRef.current?.focus()
 	}, [editing])
+
+	useEffect(() => {
+		if (!shareOpen) return
+		QRCode.toDataURL(shareUrl, { width: 240, margin: 1 }).then(setQrUrl).catch(() => setQrUrl(''))
+	}, [shareOpen, shareUrl])
 
 	const byId = (id: string) => shapes.find((s) => s.id === id)
 
@@ -487,7 +531,10 @@ export default function App() {
 
 			{/* top toolbar */}
 			<div style={bar}>
-				<strong>room:</strong> {room}
+				<strong>房號:</strong> {room}
+				<button style={{ ...btn, background: '#dbeafe' }} onClick={() => setShareOpen(true)}>
+					分享 / QR
+				</button>
 				<span style={{ color: '#888' }}>{status}</span>
 				<span style={{ color: '#888' }}>{shapes.length} 張 · {connectors.length} 連線</span>
 				<button style={btn} onClick={() => addSticky(140, 140, '', 'yellow') && undefined}>
@@ -560,6 +607,73 @@ export default function App() {
 				</div>
 				{busy && <div style={{ marginTop: 6, fontSize: 12, color: '#444' }}>{busy}</div>}
 			</div>
+
+			{/* share modal: QR + 房號 + join-by-code */}
+			{shareOpen && (
+				<div
+					onClick={() => setShareOpen(false)}
+					style={{
+						position: 'fixed',
+						inset: 0,
+						zIndex: 3000,
+						background: 'rgba(0,0,0,0.45)',
+						display: 'flex',
+						alignItems: 'center',
+						justifyContent: 'center',
+						font: '14px system-ui, sans-serif',
+					}}
+				>
+					<div
+						onClick={(e) => e.stopPropagation()}
+						style={{
+							background: '#fff',
+							borderRadius: 12,
+							padding: 24,
+							width: 320,
+							textAlign: 'center',
+							boxShadow: '0 8px 30px rgba(0,0,0,0.3)',
+						}}
+					>
+						<div style={{ color: '#666', fontSize: 13 }}>用手機掃 QR,或輸入房號加入</div>
+						<div style={{ fontSize: 40, fontWeight: 700, letterSpacing: 4, margin: '8px 0 14px' }}>{room}</div>
+						{qrUrl ? (
+							<img src={qrUrl} width={240} height={240} alt="QR" style={{ border: '1px solid #eee', borderRadius: 8 }} />
+						) : (
+							<div style={{ height: 240, lineHeight: '240px', color: '#aaa' }}>產生 QR 中…</div>
+						)}
+						<div style={{ display: 'flex', gap: 6, marginTop: 12 }}>
+							<input
+								readOnly
+								value={shareUrl}
+								onFocus={(e) => e.currentTarget.select()}
+								style={{ flex: 1, font: '12px system-ui', padding: '6px 8px', border: '1px solid #ddd', borderRadius: 6 }}
+							/>
+							<button
+								style={{ ...btn, background: '#dbeafe' }}
+								onClick={() => navigator.clipboard?.writeText(shareUrl)}
+							>
+								複製連結
+							</button>
+						</div>
+						<hr style={{ margin: '16px 0', border: 0, borderTop: '1px solid #eee' }} />
+						<div style={{ display: 'flex', gap: 6 }}>
+							<input
+								value={joinCode}
+								onChange={(e) => setJoinCode(e.target.value)}
+								onKeyDown={(e) => e.key === 'Enter' && joinRoom()}
+								placeholder="輸入房號加入別房…"
+								style={{ flex: 1, font: '14px system-ui', padding: '6px 8px', border: '1px solid #ddd', borderRadius: 6, textTransform: 'uppercase' }}
+							/>
+							<button style={btn} onClick={joinRoom}>
+								加入
+							</button>
+						</div>
+						<button style={{ ...btn, marginTop: 14 }} onClick={() => setShareOpen(false)}>
+							關閉
+						</button>
+					</div>
+				</div>
+			)}
 		</div>
 	)
 }

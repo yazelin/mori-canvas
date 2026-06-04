@@ -12,12 +12,14 @@
     "dev:client:https": "HTTPS=1 vite",
     "bot": "tsx server/bot.ts",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "setup": "bash setup.sh"
   },
   "dependencies": {
     "express": "^5.2.1",
     "konva": "^10.3.0",
     "lib0": "^0.2.117",
+    "qrcode": "^1.5.4",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "react-konva": "^19.2.4",
@@ -29,6 +31,7 @@
   "devDependencies": {
     "@types/express": "^5.0.6",
     "@types/node": "^25.9.1",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "^19.2.16",
     "@types/react-dom": "^19.2.3",
     "@types/ws": "^8.18.1",

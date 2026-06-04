@@ -21,7 +21,7 @@ import * as decoding from 'lib0/decoding'
 import { writeFile, unlink } from 'node:fs/promises'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
-import { tmpdir } from 'node:os'
+import { tmpdir, networkInterfaces } from 'node:os'
 import { join as pathJoin } from 'node:path'
 import { planBoard, type BoardPlan } from './agent.ts'
 import { transcribe } from './stt.ts'
@@ -426,6 +426,23 @@ app.get('/api/export/:room', (req, res) => {
 	res.setHeader('Content-Type', 'text/markdown; charset=utf-8')
 	res.send(md)
 })
+
+// The host's LAN IPv4 — so the client builds a share/QR URL others can actually
+// reach (localhost on a phone is the phone itself, not this machine).
+function lanIp(): string | null {
+	const addrs: string[] = []
+	for (const list of Object.values(networkInterfaces())) {
+		for (const a of list || []) if (a.family === 'IPv4' && !a.internal) addrs.push(a.address)
+	}
+	return (
+		addrs.find((a) => a.startsWith('192.168.')) ||
+		addrs.find((a) => a.startsWith('10.')) ||
+		addrs.find((a) => !a.startsWith('172.1')) || // skip docker bridges 172.17/172.18
+		addrs[0] ||
+		null
+	)
+}
+app.get('/api/lan', (_req, res) => res.json({ ip: lanIp() }))
 
 app.get('/api/health', (_req, res) => {
 	const detail = [...rooms.entries()].map(([id, room]) => ({
