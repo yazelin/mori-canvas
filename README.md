@@ -1,114 +1,183 @@
 # foss-whiteboard-spike
 
-`tldraw-agent-spike` 的**零授權成本雙胞胎**,現在已長成一個小型可玩的會議白板:**語音 → STT → agent → 共享 live 白板**,加上人類可在 Konva 畫布上拖拉/編輯/連線。全 MIT、能賣。
+一個**自架、零授權成本(全 MIT)**的會議白板:**講話 / 貼逐字稿 → AI agent 自動整理成便利貼 + 連線 → 多人即時協作的白板**。人也能在同一張板上拖拉、改字、連線、刪除,所有動作即時同步。
 
 ```
-會議語音 ─mori-ear─▶ 逐字稿 ─Groq/Qwen3 agent─▶ 便利貼+連線 ─yjs─▶ 多人 live 白板
-人類也能在同一張板上 拖拉 / 雙擊改字 / 連線 / 刪除(即時同步給所有人)
+會議語音 ──mori-ear STT──▶ 逐字稿 ──Groq/qwen3 agent──▶ 便利貼+連線 ──yjs──▶ 多人 live 白板
+                                                          人也能在同一張板上 拖拉 / 改字 / 連線 / 刪除
 ```
-
-## 結論:三步都通(真元件、真瀏覽器驗證)
 
 ![agent board](docs/agent-board.png)
 
-上圖整張板是**點一下「丟給 agent」**、把一段會議逐字稿丟給真 Groq(`openai/gpt-oss-120b`)後自動長出來的 —— 6 張便利貼按性質上色(主題=黃、決議=藍、待辦=綠、風險=紅),其中「線上預約系統」被拖到右下、兩條連線箭頭跟著它走(edge-clamp 貼邊)。
+上圖整張板是把一段會議逐字稿丟給 AI 後**自動長出來**的:便利貼按性質上色(主題=黃、決議=藍、待辦=綠、風險=紅),箭頭表示關係。
 
-| 步驟 | 做了什麼 | 驗證 |
-|---|---|---|
-| **1. agent loop** | 逐字稿 → Groq(`gpt-oss-120b`)→ 結構化 JSON(便利貼+連線),失敗 fallback 本機 Ollama `qwen3:8b` | 真 Groq 從會議稿抽 6 張正確 zh-TW 便利貼;qwen3:8b 也實測可回 JSON |
-| **2. mori-ear STT** | 錄音 → `/api/voice` → `mori-ear --input`(宇宙單一 STT)→ 逐字稿 → agent → 板 | 真 wav 經 mori-ear 轉出「嗯,我在聽。」;voice endpoint 全鏈路跑通 |
-| **3. Konva 互動** | 拖拉移動、雙擊空白新增、雙擊改字、連線模式、選取刪除、清空、**空白拖曳平移 + 滾輪縮放** | 拖拉(patchShape)即時同步、連線箭頭渲染、agent 結果即時上板 — 像素級驗證 |
+---
 
-agent/錄音是 **累積 + 智慧合併**:每次把白板現有便利貼餵給 agent,它只加「這段新講到的」重點(不重複),連線可接到既有便利貼;連兩段不同主題會累積成一張會議板而非重畫。
+## 怎麼運作(先看這個就懂要裝什麼)
 
-底層仍是前一版證好的:server 端寫共享 Y.Doc → 所有瀏覽器 <15ms 即時看到。全 MIT,無 tldraw 那顆 production license。
-
-### v0.3:Mori 出現在板上 + 持久化
-
-![presence](docs/presence.png)
-
-- **Mori 是看得見的參與者**:agent 寫便利貼時用 yjs awareness 廣播 Mori 的游標,便利貼**一張一張串流冒出**、游標跟著移動,畫完離開。所有連線的人即時看到「Mori 正在畫」。(上圖綠色 `User-5kj` 是另一個分頁的真人游標 —— 人類彼此的游標也即時可見。)
-- **持久化**:每個房間的 Y.Doc 快照存到 `.data/<room>.bin`(debounce 寫),server 重啟自動還原,不再一重啟就清空。
-- 驗證:便利貼進度 `[0,1,2,3,4,5]` 逐張出現;Mori 游標串流期間出現、結束消失;兩個分頁互看游標;`persisttest` 房重啟後從磁碟還原。
-
-### v0.4:多視角審查後的硬化 + 完善(audit-driven)
-
-跑了一輪多 agent code 審查(5 面向 → 對抗式驗證 25 條),把真 bug 與便宜高價值項做掉:
-
-**修掉的真 bug**
-- **並發競態**:同房同時跑兩個 agent/voice 會讓便利貼疊在同格、Mori 游標亂跳/畫到一半消失 → 加 **per-room 序列化鎖** + 格子座標改在 transact 內讀 live `shapes.size`(TOCTOU-safe)。驗證:兩個並發 agent → 10 張位置全不重疊、游標不卡。
-- **重啟丟資料**:debounce 500ms 寫盤,`tsx watch`/Ctrl-C 在視窗內重啟會 silent 丟最後的編輯 → 加 **SIGTERM/SIGINT graceful flush**。驗證:寫完立刻 SIGINT,快照仍被 flush、重啟還原。
-- **中文長房名持久化失效**:房名 →`encodeURIComponent` 檔名,~28+ 個中文字超過 255 byte 上限 → 靜默失敗 → 長名改 **sha1 hash 檔名**。
-- **Mori 游標卡死**:applyPlan 失敗時不清游標 → 包 **try/finally** 一定收掉。
-- **壞 JSON 回 500**:`parseLenient` 的 `JSON.parse` 無 try/catch → 加容錯降級成空 plan。
-- **連線數謊報**:回報規劃數而非實際畫出數 → 改回傳真正 `connectorsDrawn` + skip 時 warn。
-- **Ollama fallback**:補 `think:false`(qwen3 thinking 雷)+ 連不到時給「ollama serve 沒開」可讀訊息 + 合併 groq 失敗原因。
-
-**便宜硬化(預設不擋本機 demo)**
-- 預設 **bind `127.0.0.1`**(設 `HOST=0.0.0.0` 才對外)、**選用 API key**(設 `WB_API_KEY` 才要求 `X-API-Key`)、CORS 可用 `ALLOWED_ORIGINS` 收緊、prompt 把逐字稿包進不可信邊界(擋 prompt injection)。
-
-**新功能**
-- **Undo/Redo**(`Y.UndoManager`,只追蹤自己的編輯,不會撤到 Mori/別人):Ctrl+Z / Ctrl+Shift+Z、工具列 ↶ ↷。
-- **匯出**:`匯出 MD`(會後 markdown 紀錄,按 kind 分區 主題/決議/待辦/風險 + 關聯)、`匯出 PNG`(Konva backing-store)。
-- **單獨選取/刪除連線**(點箭頭→反白→Delete)、**清空二次確認**、拖拉節流(40ms)+ onDragEnd commit。
-
-## 架構
-
-| 部件 | 檔案 | 說明 |
-|---|---|---|
-| 自架 sync server | `server/sync-server.ts` | 自寫 classic-yjs 協定(`y-protocols`+`lib0`);bot/agent/voice endpoints |
-| LLM cascade | `server/llm.ts` | Groq(`openai/gpt-oss-120b`)→ Ollama(`qwen3:8b`)fallback;key/model 讀**共享 `~/.mori/config.json`**(`providers.groq` / `providers.ollama`),跟 mori-meeting-recorder 同一份 |
-| agent | `server/agent.ts` | 逐字稿 → board plan(stickies+connectors);prompt 約束「只用稿內事實、最多 6 張、kind→顏色」;JSON 寬鬆解析(剝 `<think>`/圍欄) |
-| STT | `server/stt.ts` | 委派 `mori-ear --input <file>`(吃 wav/mp3/webm,走宇宙共享 whisper-server) |
-| client | `client/src/App.tsx` | `yjs` + `WebsocketProvider` 同步 → `react-konva` 渲染;拖拉/建立/編輯/連線/刪除;agent textarea + 錄音鈕 |
-
-### HTTP endpoints(都在 :1234)
+這是 **client–server** 架構,**所有重活都跑在「主機」這一台**,其他人只是用瀏覽器連進來:
 
 ```
-POST /api/bot/:room/sticky    { text?, color? }            # server 端畫一張
-POST /api/agent/:room         { transcript }               # 逐字稿 → agent → 板
-POST /api/voice/:room?ext=webm  <raw audio bytes>          # 語音 → ear → agent → 板
-GET  /api/health
+        主機(你的電腦,跑整套)                          其他人(只要瀏覽器)
+  ┌─────────────────────────────────┐
+  │  Vite (網頁 + 反向代理) :5174    │◀───── 手機 / 同事的筆電
+  │     │ /api   │ /sync(ws)         │       (開瀏覽器連這台,零安裝)
+  │     ▼        ▼                    │
+  │  sync server :1234 (loopback)    │
+  │     ├─ 即時同步 (yjs)             │
+  │     ├─ agent  → Groq / qwen3      │  ← 用你的 Groq key
+  │     └─ 語音   → mori-ear (STT)    │  ← 用你的 mori-ear
+  └─────────────────────────────────┘
 ```
+
+- **AI 整理(打字/貼逐字稿 → 便利貼)**:靠雲端 **Groq `gpt-oss-120b`**(本機 Ollama `qwen3` 當斷線後備)。
+- **語音轉文字**:靠 **mori-ear**(走本機 whisper-server,或 Groq Whisper)。
+- **即時同步**:自寫的 yjs sync server(不依賴任何雲服務)。
+- 它**不是建構在 AgentOS 上**。跟 mori 生態的唯一關聯是:語音用 `mori-ear` CLI、Groq key 讀共用的 `~/.mori/config.json`。其餘是獨立的 FOSS app。
+
+---
+
+## 需要裝什麼
+
+### A. 主機(跑整套的那台)
+
+| 要件 | 用途 | 必要性 |
+|---|---|---|
+| **Node.js 18+** + npm | 跑 server 與前端 | 必要 |
+| `npm install`(一次) | 自動拉好所有 JS 套件(yjs/konva/react/vite/express…) | 必要 |
+| **Groq API key** 寫在 `~/.mori/config.json` 的 `providers.groq.api_key` | 「逐字稿 → 便利貼」的 AI | agent 必要 |
+| **mori-ear** CLI(`~/.cargo/bin/mori-ear`)+ whisper(本機 whisper-server,或讓 ear 走 Groq Whisper) | 「錄音 → 文字」 | 只有要語音才需要 |
+| **openssl** | 產自簽憑證給「公司區網版」用 | 只有要 HTTPS 區網才需要 |
+| 麥克風 | 主機自己要錄的話 | 選用 |
+| Ollama + `qwen3`(`ollama serve`) | Groq 連不到時的本機後備 | 選用 |
+
+> **只想打字不想語音?** 那只要 Node + `npm install` + Groq key 就能跑(打字/貼逐字稿 → 便利貼)。`mori-ear` 只有錄音才用得到。
+
+### B. 其他人(區網連進來協作)
+
+**什麼都不用裝。** 只要:
+1. 跟主機同一個 wifi / 區網
+2. 一個現代瀏覽器(Chrome / Safari / Edge / Firefox)
+3. 開主機給的網址,第一次接受一次自簽憑證警告;要錄音就允許麥克風
+
+不用 Node、不用裝 App、不用 mori-ear、不用 Groq key。他們錄的音會傳到**主機**用**主機的** mori-ear + Groq 處理,**不耗他們自己任何資源**。
+
+---
 
 ## 跑起來
 
-需要:Node 22、`~/.mori/config.json` 內有 `providers.groq.api_key`(跟宇宙其他 app 共用);語音那條另需 `mori-ear` 在 PATH/`~/.cargo/bin`;fallback 那條需 `ollama serve` + 已 pull `qwen3:8b`。
-
 ```bash
-npm install
-npm run dev          # sync server(:1234)+ Vite client(:5174)
+npm install            # 第一次
 ```
 
-開 `http://localhost:5174/?room=spike`:
+### 1) 只在本機自己玩
 
-- **雙擊空白** 新增便利貼、**雙擊便利貼** 改字、**拖拉** 移動、**連線模式** 點兩張連線、選取後 **Delete** 刪除。
-- 左下面板貼一段會議逐字稿按 **丟給 agent**,或按 **● 錄音** 講話(用 mic)→ 自動轉錄 + 上板。
-- 開兩個分頁進同房,所有動作即時同步。
-
-CLI 也可:
 ```bash
-npm run bot -- "外部 agent 寫的" spike blue        # 外部 yjs peer 寫一張
-curl -X POST localhost:1234/api/agent/spike -H 'Content-Type: application/json' \
-  -d '{"transcript":"今天開會討論…"}'               # 逐字稿 → 板
-curl -X POST 'localhost:1234/api/voice/spike?ext=wav' \
-  -H 'Content-Type: audio/wav' --data-binary @clip.wav  # 語音 → 板
+npm run dev            # sync server(loopback :1234)+ Vite(:5174)
+```
+開 `http://localhost:5174/?room=meet`。
+
+### 2) 公司區網版(多裝置 / 手機也能錄音)
+
+這個版本把網頁跑在 **HTTPS** 上,這樣**手機/平板才能用麥克風**(瀏覽器規定麥克風只在 HTTPS 或 localhost 才給用)。架構上 sync server 縮在 loopback,只有 **HTTPS 的 5174** 對外。
+
+**第一次設定(產含你區網 IP 的自簽憑證):**
+```bash
+# 先查你的區網 IP:  hostname -I
+openssl req -x509 -newkey rsa:2048 -nodes \
+  -keyout certs/key.pem -out certs/cert.pem -days 825 \
+  -subj "/CN=foss-whiteboard-spike" \
+  -addext "subjectAltName=DNS:localhost,IP:127.0.0.1,IP:你的區網IP"
+```
+(憑證放 `certs/`,已被 gitignore。IP 換了要重產。)
+
+**啟動:**
+```bash
+npm run dev:lan        # sync loopback + Vite HTTPS(:5174)
 ```
 
-## 驗證過程中踩到的雷(寫給下一棒)
+**大家連:**
+```
+https://你的區網IP:5174/?room=meet        # 手機跟筆電都用這個(注意是 https)
+```
+- 每台**第一次**會跳「您的連線不是私人連線」→ 進階 →「繼續前往(不安全)」(這是你自己機器的憑證,點過去即可,**一次接受涵蓋頁面+同步+錄音**)。
+- 進去後:兩台同一張板即時同步;按 **● 錄音** → 允許麥克風 → 講話 → 卡片冒出來,大家都看到 Mori 畫。
+- 多人同時錄沒問題:卡片會累積、自動去重、不互蓋(server 有 per-room 序列化鎖)。
 
-1. **`@y/websocket-server`(yjs v3 官方推薦 server)不能用 classic yjs client 寫** —— 內部依賴 fork `@y/y`,client→server 寫會噴 `store.getClock is not a function`(對「產品要能 client 端寫」致命)。解法:自寫 classic-yjs server(本 repo `sync-server.ts`)。
-2. **React StrictMode + effect cleanup `provider.destroy()` 會殺連線** —— dev 下 mount→cleanup→mount,剛連上就被拆。本 spike 拿掉 StrictMode。
-3. **note 文字渲染**:本版用 Konva `<Text>` 沒問題;但若改回 tldraw,note 的 `fontSizeAdjustment` 不能填 0(=字體×0 隱形)。
-4. **automation chrome 截圖會全黑**(混合 GPU),要改讀 canvas 像素 / `canvas.toDataURL()` 導出 backing store(本 repo proof 圖都這樣產)。
-5. **agent JSON**:gpt-oss / qwen3 都可能夾 `<think>` 或 markdown 圍欄,解析要先剝再取外層 `{...}`;qwen3 記得 `think:false`。
-6. **mori-ear**:batch 模式 `--input` 不卡 single-instance lock(daemon 在跑也能用);HTTP `/inference` 只吃 WAV,CLI 才吃 webm/mp3,所以 voice endpoint 走 CLI 最通用。
+**安全 / 收尾**
+- 對外只剩 HTTPS 的 5174;但**沒鑑權**,同 wifi 拿到網址 + 接受憑證的人就能進、會用到你的 Groq。內網信任場合 OK,**試完記得關**。
+- 想加鎖:啟動前設 `WB_API_KEY=xxx`(API 要帶 `X-API-Key`)、`ALLOWED_ORIGINS=https://...`(收緊 CORS)。
+- 收掉:`kill $(lsof -ti tcp:1234) $(lsof -ti tcp:5174)`。
 
-## 下一步(此 spike 之外)
+---
 
-兩個最大的還沒做(留待接 Mori body interface 時):
-- **即時串流轉錄**:目前是「錄一段才送批次」,真會議要 mori-ear 連續串流 + 語意邊界才打 agent。
-- **agent 改寫/合併/刪除既有便利貼**:目前 agent 只能 append(決議翻案、待辦完成只會再貼一張)。需把 BoardPlan 擴成 op-based。
+## 操作
 
-較小的:
-- connectors 方向語意上色 / 加標籤;room 列表/landing/分享連結;rate-limit;持久化改增量 append log;同一張便利貼欄位級並發(目前整顆 LWW)。
+- **雙擊空白** 新增便利貼、**雙擊便利貼** 改字、**拖拉** 移動、**連線模式** 點兩張連線、選便利貼/連線後 **Delete** 刪除。
+- **Ctrl+Z / Ctrl+Shift+Z** 復原/重做(只動自己的,不會撤掉別人或 Mori 的)。
+- **空白處拖曳** 平移、**滾輪** 縮放、**回正** 歸零視圖。
+- 左下面板:貼逐字稿按 **丟給 agent**,或按 **● 錄音** 講話。
+- **匯出 MD**(會後 markdown 紀錄,按 主題/決議/待辦/風險 分區 + 關聯)、**匯出 PNG**。
+
+CLI / API(server 內部在 :1234,client 經 Vite 同源代理 `/api`、`/sync`):
+```bash
+npm run bot -- "外部寫的" meet blue                 # 外部 yjs peer 直接寫一張
+curl -X POST localhost:1234/api/agent/meet -H 'Content-Type: application/json' \
+  -d '{"transcript":"今天開會討論…"}'                # 逐字稿 → 板
+curl localhost:1234/api/export/meet                  # 匯出 markdown
+```
+
+---
+
+## 功能一覽
+
+- **AI 整理**:逐字稿 → Groq `gpt-oss-120b`(qwen3 後備)→ 便利貼(按 kind 上色)+ 關係連線。**累積 + 智慧合併**:餵現有便利貼給 agent,只加新重點、不重複,連線可接到舊的。
+- **語音**:錄音 → mori-ear STT → agent → 板。
+- **Mori 是看得見的參與者**:agent 寫便利貼時用 yjs awareness 廣播 Mori 游標,卡片**一張張串流冒出**、游標跟著走、畫完離開,所有人即時看到。人類彼此的游標也即時可見(見下圖綠色 `User-xxx`)。
+- **人類互動**:拖拉/新增/改字/連線/刪除、平移縮放、Undo/Redo。
+- **持久化**:每房 Y.Doc 存 `.data/<room>.bin`,server 重啟自動還原(含 SIGTERM/SIGINT graceful flush,不丟最後編輯)。
+- **匯出**:markdown 會議紀錄 + PNG。
+
+![presence](docs/presence.png)
+
+---
+
+## 架構 / 檔案
+
+| 部件 | 檔案 | 說明 |
+|---|---|---|
+| sync server | `server/sync-server.ts` | 自寫 classic-yjs 協定(`y-protocols`+`lib0`);agent/voice/bot/export endpoints;持久化;per-room 鎖;Mori 游標 |
+| LLM cascade | `server/llm.ts` | Groq(`gpt-oss-120b`)→ Ollama(`qwen3`)後備;key/model 讀共用 `~/.mori/config.json` |
+| agent | `server/agent.ts` | 逐字稿 → board plan;累積/合併;JSON 寬鬆解析 |
+| STT | `server/stt.ts` | 委派 `mori-ear --input`(吃 wav/mp3/webm) |
+| client | `client/src/App.tsx` | yjs + WebsocketProvider 同步 → react-konva 渲染;全部互動 + 錄音/agent 面板 |
+| 反向代理 / HTTPS | `vite.config.ts` | `/api`+`/sync(ws)` 代理到 loopback 的 :1234;`HTTPS=1` 時用 `certs/` 跑 HTTPS |
+
+---
+
+## 踩過的雷(寫給下一棒)
+
+1. **`@y/websocket-server`(yjs v3 官方推薦 server)不能用 classic yjs client 寫** —— 它依賴 fork `@y/y`,client→server 寫會噴 `store.getClock is not a function`。解法:自寫 classic-yjs server(本 repo `sync-server.ts`)。
+2. **非 ASCII 房名要 `decodeURIComponent`**:WS 路徑沒 decode 而 `/api/:room` 被 express 自動 decode → `會議室甲` 變成兩個房,曾害「agent 說 6 張卻畫面空白」。
+3. **手機錄音要 HTTPS**:`http://<區網IP>` 是不安全來源,瀏覽器擋 `getUserMedia`。所以才有「公司區網版」的自簽 HTTPS。
+4. **React StrictMode + cleanup `provider.destroy()` 會殺連線** → 本 spike 拿掉 StrictMode。
+5. **agent JSON**:gpt-oss/qwen3 會夾 `<think>`/圍欄,要先剝再取外層 `{...}`;qwen3 記得 `think:false`;connector 用 `{from,to}` 別用 `[[a,b]]`(模型會黏成 `["01"]`)。
+6. **mori-ear**:`--input` batch 不卡 single-instance lock(daemon 在跑也能用);HTTP `/inference` 只吃 WAV,CLI 才吃 webm/mp3,所以走 CLI 最通用。
+7. **server 重啟丟資料**:debounce 寫盤 + `tsx watch`/Ctrl-C → 要 SIGTERM/SIGINT flush(已做)。
+
+---
+
+## 路線圖
+
+**兩個最大的還沒做**(接成 Mori 身體部件的關鍵):
+- **即時串流轉錄**:目前是「錄一段才送批次」;真會議要 mori-ear 連續串流 + 語意邊界才打 agent。
+- **agent 改寫/合併/刪除既有便利貼**:目前只能 append(決議翻案、待辦完成只會再貼一張)→ 需把 BoardPlan 擴成 op-based。
+
+**較小的**:房間列表 / landing / 分享連結;rate-limit;connector 方向語意上色+標籤;持久化改增量 append log;同一張便利貼欄位級並發(目前整顆 LWW)。
+
+---
+
+## 現況 / 授權
+
+- **現況**:可玩的 spike,跑在開發機上(臨時程序 + in-memory + `.data/` 檔)。本機 git 版控(尚未 push 任何 remote)。**不是正式部署**:主機關掉/睡眠就停(板會留在 `.data/`,重開還在)。
+- **授權**:核心依賴(yjs / y-protocols / lib0 / ws / konva / react-konva / react / express / vite)全 **MIT** —— 可閉源、可賣,**沒有 tldraw 那顆 production license**。語音那塊綁 `mori-ear`(你的工具),搬到別的機器要自己接 STT。
