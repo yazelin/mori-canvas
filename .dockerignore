@@ -1,0 +1,13 @@
+**/node_modules
+**/target
+**/dist
+.data
+certs
+.git
+*.tar.gz
+*.bundle
+rust-sync-spike
+docs
+deploy
+scripts
+src-tauri

@@ -222,6 +222,8 @@ export default function App() {
 	const [pngTransparent, setPngTransparent] = useState(false)
 	const [settingsOpen, setSettingsOpen] = useState(false)
 	const [settings, setSettings] = useState({ localOnly: false, groqKey: true, spacing: 1, autoTidy: true, mode: 'mori', sttSource: 'local', whisperUrl: '' })
+	const [sponsor, setSponsor] = useState<{ url?: string; label?: string; notice?: string }>({})
+	const [sponsorHidden, setSponsorHidden] = useState(false)
 	const [caps, setCaps] = useState({ moriEar: true, whisperServer: true, groqKey: true })
 	const [cfgInfo, setCfgInfo] = useState({ llmGroqModel: '', llmOllamaModel: '', sttProvider: '', sttGroqModel: '', sttLocalModel: '' })
 	const [subtitle, setSubtitle] = useState('') // transient STT caption (UX feedback)
@@ -525,6 +527,7 @@ export default function App() {
 				setSettings({ localOnly: r.localOnly, groqKey: r.groqKey, spacing: r.spacing, autoTidy: r.autoTidy, mode: r.mode, sttSource: r.sttSource, whisperUrl: r.whisperUrl || '' })
 				setCaps({ moriEar: r.moriEar, whisperServer: r.whisperServer, groqKey: r.groqKey })
 				setCfgInfo({ llmGroqModel: r.llmGroqModel, llmOllamaModel: r.llmOllamaModel, sttProvider: r.sttProvider, sttGroqModel: r.sttGroqModel, sttLocalModel: r.sttLocalModel })
+				setSponsor({ url: r.sponsorUrl || '', label: r.sponsorLabel || '贊助', notice: r.demoNotice || '' })
 			})
 			.catch(() => {})
 	}, [])
@@ -1685,7 +1688,20 @@ export default function App() {
 				</div>
 			)}
 
-			{/* agent / voice panel (collapsible; record stays visible) */}
+							{/* demo / sponsor banner (only when the host sets SPONSOR_URL / DEMO_NOTICE env) */}
+				{(sponsor.notice || sponsor.url) && !sponsorHidden && (
+					<div className="glass float-in" style={{ position: 'fixed', bottom: 14, right: 14, zIndex: 1300, display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', maxWidth: 'min(92vw, 430px)', fontSize: 12.5 }}>
+						{sponsor.notice && <span className="muted" style={{ lineHeight: 1.35 }}>{sponsor.notice}</span>}
+						{sponsor.url && (
+							<a href={sponsor.url} target="_blank" rel="noreferrer" style={{ flex: '0 0 auto' }}>
+								<button className="btn-accent" style={{ padding: '5px 11px' }}>{sponsor.label || '贊助'}</button>
+							</a>
+						)}
+						<button title="關閉" style={{ flex: '0 0 auto', padding: '3px 8px' }} onClick={() => setSponsorHidden(true)}>✕</button>
+					</div>
+				)}
+
+				{/* agent / voice panel (collapsible; record stays visible) */}
 			<div className="glass float-in" style={{ ...panel, width: mobile ? 'min(86vw, 320px)' : 320, left: mobile ? 8 : 14 }}>
 				<div
 					onClick={() => setPanelOpen((o) => !o)}

@@ -8,3 +8,8 @@ client/dist/
 server-rs/target/
 client/dist/
 src-tauri/target/
+
+# secrets — never commit
+.env
+.env.*
+!.env.example

@@ -1,0 +1,28 @@
+# Render Blueprint — connect this GitHub repo on render.com and it reads this file.
+# (Or create a Web Service manually: runtime = Docker, it auto-detects the Dockerfile.)
+services:
+  - type: web
+    name: mori-canvas
+    runtime: docker
+    plan: free            # free spins down after ~15 min idle (cold start on next visit)
+    region: singapore     # closest Render region to Taiwan
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      # REQUIRED — your Groq API key (set the value in the Render dashboard, not in git)
+      - key: GROQ_API_KEY
+        sync: false
+      # demo guard: max AI/STT requests PER IP per minute (each visitor has their own quota;
+      # only people sharing one public IP/wifi share it). Tune anytime in the dashboard.
+      # The real money-guard is a spending cap on your Groq account.
+      - key: DEMO_RATE_PER_MIN
+        value: "60"
+      # sponsor banner (optional). Set SPONSOR_URL in the dashboard to show the button.
+      - key: SPONSOR_URL
+        sync: false
+      - key: SPONSOR_LABEL
+        value: 贊助
+      - key: DEMO_NOTICE
+        value: 試玩版:AI 由站長 API 處理請手下留情;資料不會永久保存,想留著請用「匯出→下載畫板檔」🙏
+      # NOTE: do NOT set HTTPS — Render terminates TLS at the edge; the container serves HTTP.
+      # PORT is injected by Render automatically; the server binds it on 0.0.0.0.

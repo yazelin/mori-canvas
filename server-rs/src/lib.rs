@@ -94,15 +94,52 @@ struct Settings {
     whisper_url: String,
 }
 static SETTINGS: Lazy<Mutex<Settings>> = Lazy::new(|| {
+    // capability-aware defaults: no mori-ear (e.g. on a cloud host) => custom/cloud (Groq Whisper)
+    let caps = stt::stt_capabilities();
+    let has_ear = caps.get("moriEar").and_then(|v| v.as_bool()).unwrap_or(false);
+    let has_ws = caps.get("whisperServer").and_then(|v| v.as_bool()).unwrap_or(false);
     Mutex::new(Settings {
         spacing: 1.0,
         auto_tidy: true,
-        mode: "mori".into(),
-        stt_source: "local".into(),
+        mode: if has_ear { "mori" } else { "custom" }.into(),
+        stt_source: if has_ws { "local" } else { "cloud" }.into(),
         local_only: false,
         whisper_url: String::new(),
     })
 });
+
+// ---- demo guards: per-IP rate limit + sponsor banner (env-driven, off unless set) ----
+fn demo_rate_per_min() -> Option<u32> {
+    std::env::var("DEMO_RATE_PER_MIN").ok().and_then(|v| v.parse().ok()).filter(|n| *n > 0)
+}
+static RATE_HITS: Lazy<Mutex<HashMap<String, Vec<std::time::Instant>>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+fn client_ip(xff: &Option<String>) -> String {
+    xff.as_ref().and_then(|s| s.split(',').next()).map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).unwrap_or_else(|| "?".into())
+}
+/// sliding 60s window; returns false (blocked) when over the per-minute limit. No limit set => always ok.
+async fn rate_ok(ip: &str) -> bool {
+    let limit = match demo_rate_per_min() {
+        Some(n) => n as usize,
+        None => return true,
+    };
+    let now = std::time::Instant::now();
+    let mut m = RATE_HITS.lock().await;
+    let hits = m.entry(ip.to_string()).or_default();
+    hits.retain(|t| now.duration_since(*t).as_secs() < 60);
+    if hits.len() >= limit {
+        return false;
+    }
+    hits.push(now);
+    true
+}
+fn sponsor_config() -> Value {
+    let g = |k: &str| std::env::var(k).ok().filter(|s| !s.is_empty());
+    json!({
+        "sponsorUrl": g("SPONSOR_URL"),
+        "sponsorLabel": g("SPONSOR_LABEL").unwrap_or_else(|| "贊助".into()),
+        "demoNotice": g("DEMO_NOTICE"),
+    })
+}
 
 fn lan_ip() -> Option<String> {
     use std::net::UdpSocket;
@@ -364,7 +401,7 @@ pub async fn serve(port: u16) {
     let settings_get = warp::get().and(warp::path!("api" / "settings")).and_then(|| async move {
         let s = SETTINGS.lock().await.clone();
         let mut o = json!({ "ok": true, "spacing": s.spacing, "autoTidy": s.auto_tidy, "mode": s.mode, "sttSource": s.stt_source, "localOnly": s.local_only, "whisperUrl": s.whisper_url, "groqKey": llm::groq_key().is_some() });
-        for src in [llm::config_info(), stt::stt_capabilities()] {
+        for src in [llm::config_info(), stt::stt_capabilities(), sponsor_config()] {
             if let (Value::Object(dst), Value::Object(m)) = (&mut o, src) {
                 for (k, v) in m {
                     dst.insert(k, v);
@@ -402,7 +439,10 @@ pub async fn serve(port: u16) {
 
     // POST /api/agent/:room — the AI turn (intent classify -> command or content)
     let r_agent = rooms.clone();
-    let agent_ep = warp::post().and(warp::path!("api" / "agent" / String)).and(warp::body::json()).and(with(r_agent)).and_then(|name: String, body: Value, rooms: sync::Rooms| async move {
+    let agent_ep = warp::post().and(warp::path!("api" / "agent" / String)).and(warp::body::json()).and(with(r_agent)).and(warp::header::optional::<String>("x-forwarded-for")).and_then(|name: String, body: Value, rooms: sync::Rooms, xff: Option<String>| async move {
+        if !rate_ok(&client_ip(&xff)).await {
+            return Ok::<_, warp::Rejection>(warp::reply::json(&json!({ "ok": false, "error": "太頻繁了,休息一下再試(demo 限流)" })));
+        }
         let transcript = body.get("transcript").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
         if transcript.is_empty() {
             return Ok::<_, warp::Rejection>(warp::reply::json(&json!({ "ok": false, "error": "transcript required" })));
@@ -419,7 +459,10 @@ pub async fn serve(port: u16) {
     });
 
     // POST /api/transcribe — audio -> text (no agent)
-    let transcribe_ep = warp::post().and(warp::path!("api" / "transcribe")).and(warp::query::<HashMap<String, String>>()).and(warp::body::bytes()).and_then(|q: HashMap<String, String>, body: bytes::Bytes| async move {
+    let transcribe_ep = warp::post().and(warp::path!("api" / "transcribe")).and(warp::query::<HashMap<String, String>>()).and(warp::body::bytes()).and(warp::header::optional::<String>("x-forwarded-for")).and_then(|q: HashMap<String, String>, body: bytes::Bytes, xff: Option<String>| async move {
+        if !rate_ok(&client_ip(&xff)).await {
+            return Ok::<_, warp::Rejection>(warp::reply::json(&json!({ "ok": false, "error": "太頻繁了,休息一下(demo 限流)" })));
+        }
         let ext = sanitize_ext(q.get("ext").map(|s| s.as_str()).unwrap_or("webm"));
         let tmp = write_tmp("t", &ext, &body).await;
         let s = SETTINGS.lock().await.clone();
@@ -433,8 +476,11 @@ pub async fn serve(port: u16) {
 
     // POST /api/voice/:room — audio -> STT -> agent turn
     let r_voice = rooms.clone();
-    let voice_ep = warp::post().and(warp::path!("api" / "voice" / String)).and(warp::query::<HashMap<String, String>>()).and(warp::body::bytes()).and(with(r_voice)).and_then(
-        |name: String, q: HashMap<String, String>, body: bytes::Bytes, rooms: sync::Rooms| async move {
+    let voice_ep = warp::post().and(warp::path!("api" / "voice" / String)).and(warp::query::<HashMap<String, String>>()).and(warp::body::bytes()).and(with(r_voice)).and(warp::header::optional::<String>("x-forwarded-for")).and_then(
+        |name: String, q: HashMap<String, String>, body: bytes::Bytes, rooms: sync::Rooms, xff: Option<String>| async move {
+            if !rate_ok(&client_ip(&xff)).await {
+                return Ok::<_, warp::Rejection>(warp::reply::json(&json!({ "ok": false, "error": "太頻繁了,休息一下(demo 限流)" })));
+            }
             let ext = sanitize_ext(q.get("ext").map(|s| s.as_str()).unwrap_or("webm"));
             let tmp = write_tmp("voice", &ext, &body).await;
             let s = SETTINGS.lock().await.clone();
@@ -461,8 +507,11 @@ pub async fn serve(port: u16) {
 
     // POST /api/card/:room/:cardId — dictate one card's text/tags/owner/kind
     let r_card = rooms.clone();
-    let card_ep = warp::post().and(warp::path!("api" / "card" / String / String)).and(warp::query::<HashMap<String, String>>()).and(warp::body::bytes()).and(with(r_card)).and_then(
-        |name: String, card_id: String, q: HashMap<String, String>, body: bytes::Bytes, rooms: sync::Rooms| async move {
+    let card_ep = warp::post().and(warp::path!("api" / "card" / String / String)).and(warp::query::<HashMap<String, String>>()).and(warp::body::bytes()).and(with(r_card)).and(warp::header::optional::<String>("x-forwarded-for")).and_then(
+        |name: String, card_id: String, q: HashMap<String, String>, body: bytes::Bytes, rooms: sync::Rooms, xff: Option<String>| async move {
+            if !rate_ok(&client_ip(&xff)).await {
+                return Ok::<_, warp::Rejection>(warp::reply::json(&json!({ "ok": false, "error": "太頻繁了,休息一下(demo 限流)" })));
+            }
             let ext = sanitize_ext(q.get("ext").map(|s| s.as_str()).unwrap_or("webm"));
             let tmp = write_tmp("c", &ext, &body).await;
             let s = SETTINGS.lock().await.clone();
