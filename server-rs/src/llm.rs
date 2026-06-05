@@ -94,7 +94,7 @@ pub fn config_info() -> Value {
     };
     json!({
         "llmGroqModel": g(&["providers","groq","model"], "openai/gpt-oss-120b"),
-        "llmOllamaModel": g(&["providers","ollama","model"], "qwen3:8b"),
+        "llmOllamaModel": g(&["providers","ollama","model"], "qwen3:4b-instruct-2507-q4_K_M"),
         "sttProvider": g(&["stt_provider"], "groq"),
         "sttGroqModel": g(&["providers","groq","stt_model"], "whisper-large-v3-turbo"),
         "sttLocalModel": g(&["providers","whisper-local","model_path"], "(未設定)"),
@@ -127,7 +127,7 @@ async fn call_groq(messages: &[Msg], json_mode: bool) -> Result<String, String> 
 async fn call_ollama(messages: &[Msg], json_mode: bool) -> Result<String, String> {
     let c = mori_config();
     let base = c.get("providers").and_then(|p| p.get("ollama")).and_then(|o| o.get("base_url")).and_then(|b| b.as_str()).unwrap_or("http://localhost:11434").trim_end_matches('/').to_string();
-    let model = c.get("providers").and_then(|p| p.get("ollama")).and_then(|o| o.get("model")).and_then(|m| m.as_str()).unwrap_or("qwen3:8b").to_string();
+    let model = c.get("providers").and_then(|p| p.get("ollama")).and_then(|o| o.get("model")).and_then(|m| m.as_str()).unwrap_or("qwen3:4b-instruct-2507-q4_K_M").to_string();
     let msgs: Vec<Value> = messages.iter().map(|m| json!({"role": m.role, "content": m.content})).collect();
     let mut body = json!({ "model": model, "messages": msgs, "stream": false, "think": false, "options": { "num_ctx": 8192 } });
     if json_mode {
@@ -142,11 +142,18 @@ async fn call_ollama(messages: &[Msg], json_mode: bool) -> Result<String, String
 }
 
 /// Hard-convert any model output to Taiwan Traditional Chinese. LLMs (gpt-oss / qwen)
-/// follow a "use 繁體 not 簡體" instruction unreliably, so we don't trust them — we
-/// convert deterministically. JSON keys are ASCII so structure is untouched; only the
-/// Chinese values flip to 繁體 (台灣用語). No-op on non-Chinese text.
-pub fn to_traditional(s: &str) -> String {
-    zhconv::zhconv(s, zhconv::Variant::ZhTW)
+/// follow a "use 繁體 not 簡體" instruction unreliably, so we don't trust them — we convert
+/// deterministically with ferrous-opencc S2twp (OpenCC official dict + 台灣詞彙片語, same
+/// as mori-meeting-recorder). Pure Rust, dict bundled => no external install / no C dep.
+/// JSON keys are ASCII so structure is untouched; only Chinese values flip. No-op on failure.
+pub fn to_traditional(text: &str) -> String {
+    use ferrous_opencc::config::BuiltinConfig;
+    use ferrous_opencc::OpenCC;
+    static CC: std::sync::OnceLock<Option<OpenCC>> = std::sync::OnceLock::new();
+    match CC.get_or_init(|| OpenCC::from_config(BuiltinConfig::S2twp).ok()).as_ref() {
+        Some(cc) => cc.convert(text),
+        None => text.to_string(),
+    }
 }
 
 /// Visitor's own AI (if configured) > Groq > Ollama. local_only => Ollama only.
@@ -178,6 +185,7 @@ mod tests {
     fn converts_simplified_to_traditional() {
         // the exact failure the user saw: 开始节点 must become 開始節點
         assert_eq!(super::to_traditional("开始节点"), "開始節點");
+        assert_eq!(super::to_traditional("软件"), "軟體"); // 台灣詞彙(s2twp,非僅字形)
         // JSON keys (ASCII) stay intact; the Chinese value flips to 繁體
         let j = super::to_traditional(r#"{"text":"开始决定"}"#);
         assert!(j.contains("\"text\""), "JSON key kept");

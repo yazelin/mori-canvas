@@ -92,7 +92,7 @@ async fn local_whisper(path: &str, url_override: &str) -> Result<String, String>
 pub async fn transcribe(audio_path: &str, mode: &str, stt_source: &str, whisper_url: &str) -> Result<String, String> {
     if mode != "custom" {
         let out = tokio::process::Command::new(ear_path()).args(["--input", audio_path]).output().await.map_err(|e| format!("mori-ear: {e}"))?;
-        return Ok(String::from_utf8_lossy(&out.stdout).trim().to_string());
+        return Ok(crate::llm::to_traditional(String::from_utf8_lossy(&out.stdout).trim()));
     }
     // custom: silence-trim check first
     let trimmed = trim_silence(audio_path).await;
@@ -106,5 +106,6 @@ pub async fn transcribe(audio_path: &str, mode: &str, stt_source: &str, whisper_
     if trimmed != audio_path {
         let _ = tokio::fs::remove_file(&trimmed).await;
     }
-    result
+    // STT (Whisper) often emits 簡體 — convert so the transcript/逐字記錄 is 繁體 like the cards.
+    result.map(|t| crate::llm::to_traditional(&t))
 }
