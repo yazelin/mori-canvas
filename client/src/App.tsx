@@ -118,7 +118,8 @@ export default function App() {
 	const [connectMode, setConnectMode] = useState(false)
 	const [connectFrom, setConnectFrom] = useState<string | null>(null)
 	const [editing, setEditing] = useState<{ id: string; value: string } | null>(null)
-	const [agentText, setAgentText] = useState(DEMO_TRANSCRIPT)
+	const [agentText, setAgentText] = useState('') // manual-transcript draft (local only, not synced)
+	const [showPaste, setShowPaste] = useState(false) // the paste-transcript option is hidden by default
 	const [busy, setBusy] = useState('')
 	const editRef = useRef<HTMLTextAreaElement>(null)
 	const stageRef = useRef<any>(null)
@@ -178,6 +179,9 @@ export default function App() {
 	function joinRoom() {
 		const c = joinCode.trim().toUpperCase()
 		if (c && c !== room) location.href = `${location.pathname}?room=${encodeURIComponent(c)}`
+	}
+	function tidy() {
+		fetch(`${SYNC_HTTP}/api/rooms/${encodeURIComponent(room)}/tidy`, { method: 'POST' }).catch(() => {})
 	}
 	function exportPng() {
 		const uri = stageRef.current?.toDataURL({ pixelRatio: 2 })
@@ -880,6 +884,13 @@ export default function App() {
 				<button style={btn} title="下載白板圖片 (PNG)" onClick={exportPng}>
 					匯出 PNG
 				</button>
+				<button
+					title="自動把便利貼按類型分欄排整齊(主題/待辦/決議/風險各一欄)"
+					style={{ ...btn, background: 'var(--accent-soft)', borderColor: 'var(--accent)', color: 'var(--accent)' }}
+					onClick={tidy}
+				>
+					自動排列
+				</button>
 				<button style={btn} title="視圖回到原點與原始縮放" onClick={() => setView({ x: 0, y: 0, scale: 1 })}>
 					回正
 				</button>
@@ -953,21 +964,9 @@ export default function App() {
 					onClick={() => setPanelOpen((o) => !o)}
 					style={{ fontWeight: 600, cursor: 'pointer', userSelect: 'none' }}
 				>
-					{panelOpen ? '▾' : '▸'} 會議 → 白板
+					{panelOpen ? '▾' : '▸'} 開會記錄
 				</div>
-				{panelOpen && (
-					<>
-						<textarea
-							value={agentText}
-							onChange={(e) => setAgentText(e.target.value)}
-							placeholder="貼一段會議逐字稿…"
-							style={{ width: '100%', height: 70, font: '12px system-ui', resize: 'vertical', boxSizing: 'border-box', marginTop: 6 }}
-						/>
-						<button title="把上面這段逐字稿交給 AI,整理成彩色便利貼" style={{ ...btn, width: '100%', marginTop: 6 }} onClick={runAgent}>
-							丟給 agent
-						</button>
-					</>
-				)}
+				{/* voice = the main way to get content onto the board */}
 				<button
 					className={meeting ? 'live' : undefined}
 					style={{
@@ -985,14 +984,37 @@ export default function App() {
 				>
 					{meeting ? `■ 停止會議記錄（已整理 ${segCount} 段）` : '● 開始會議記錄'}
 				</button>
-				<button
-					style={{ ...btn, width: '100%', marginTop: 6, fontSize: 12, background: recording ? '#fecaca' : '#f3f4f6' }}
-					title="只錄一段:按開始、講話、再按停止"
-					onClick={toggleRecord}
-					disabled={meeting}
-				>
-					{recording ? '■ 停止' : '單次錄一段'}
-				</button>
+				{panelOpen && (
+					<>
+						<button
+							style={{ ...btn, width: '100%', marginTop: 6, fontSize: 12, background: recording ? '#fecaca' : '#f3f4f6' }}
+							title="只錄一段:按開始、講話、再按停止"
+							onClick={toggleRecord}
+							disabled={meeting}
+						>
+							{recording ? '■ 停止' : '單次錄一段'}
+						</button>
+						{/* manual transcript = secondary, hidden until you ask for it */}
+						<div style={{ marginTop: 8, fontSize: 12 }}>
+							<span onClick={() => setShowPaste((v) => !v)} style={{ cursor: 'pointer', color: 'var(--accent)' }}>
+								{showPaste ? '收起貼逐字稿' : '或:貼現成的逐字稿 ▸'}
+							</span>
+						</div>
+						{showPaste && (
+							<>
+								<textarea
+									value={agentText}
+									onChange={(e) => setAgentText(e.target.value)}
+									placeholder="把現成的會議逐字稿貼進來,按下面轉成便利貼(這格只給你自己看,不會同步給別人)"
+									style={{ width: '100%', height: 70, fontSize: 12, resize: 'vertical', boxSizing: 'border-box', marginTop: 6 }}
+								/>
+								<button title="把上面這段逐字稿交給 AI,整理成彩色便利貼" style={{ ...btn, width: '100%', marginTop: 6 }} onClick={runAgent}>
+									丟給 agent
+								</button>
+							</>
+						)}
+					</>
+				)}
 				{busy && <div style={{ marginTop: 6, fontSize: 12, color: '#444' }}>{busy}</div>}
 			</div>
 

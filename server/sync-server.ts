@@ -212,22 +212,33 @@ function onConnection(conn: WebSocket, req: { url?: string }) {
 
 const rid = (p: string) => `${p}-${Math.random().toString(36).slice(2, 10)}`
 
-/** Place one sticky into the shared room. Returns its id. */
+// auto-layout: cards live in columns by kind (主題/待辦/決議/風險). A new card drops
+// to the bottom of its kind's column, so the board stays tidy as it keeps growing.
+const COL_ORDER = ['yellow', 'green', 'blue', 'red']
+const CARD_W = 200
+const CARD_H = 200
+const COL_GAP = 50
+const ROW_GAP = 36
+const X0 = 120
+const Y0 = 120
+const columnOf = (color: string) => {
+	const i = COL_ORDER.indexOf(color)
+	return i < 0 ? COL_ORDER.length : i
+}
+const slotXY = (col: number, row: number) => ({ x: X0 + col * (CARD_W + COL_GAP), y: Y0 + row * (CARD_H + ROW_GAP) })
+function nextRowInColumn(shapes: Y.Map<any>, col: number): number {
+	let n = 0
+	for (const s of shapes.values()) if ((s as any).type === 'sticky' && columnOf((s as any).color) === col) n++
+	return n
+}
+
+/** Place one sticky into its kind-column (auto-layout). Returns its id. */
 function placeSticky(room: Room, text: string, color: string, drawnBy: string): string {
 	const shapes = room.doc.getMap('shapes')
 	const id = rid('sticky')
-	const n = shapes.size
-	shapes.set(id, {
-		id,
-		type: 'sticky',
-		x: 120 + (n % 5) * 240,
-		y: 120 + Math.floor(n / 5) * 240,
-		w: 200,
-		h: 200,
-		text,
-		color,
-		drawnBy,
-	})
+	const col = columnOf(color)
+	const { x, y } = slotXY(col, nextRowInColumn(shapes, col))
+	shapes.set(id, { id, type: 'sticky', x, y, w: CARD_W, h: CARD_H, text, color, drawnBy })
 	return id
 }
 
@@ -304,21 +315,19 @@ async function applyPlan(
 				console.log(`[agent] ~${plan.updates?.length || 0} updates, -${plan.deletes?.length || 0} deletes in "${roomName}"`)
 		}
 
-		// Stream the stickies in one-by-one, moving Mori's live cursor to each so
-		// every connected human sees Mori actually drawing. The grid slot is read
-		// from the LIVE shapes.size inside the transact, so concurrent writes can't
-		// make two stickies land on the same cell (TOCTOU-safe).
+		// Stream the stickies in one-by-one into their kind-column (auto-layout),
+		// moving Mori's live cursor to each. Column row is read from the LIVE board
+		// inside the transact, so concurrent writes can't collide.
 		for (const s of plan.stickies) {
 			const id = rid('sticky')
 			let cx = 0
 			let cy = 0
 			room.doc.transact(() => {
-				const n = shapes.size
-				const x = 120 + (n % 5) * 240
-				const y = 120 + Math.floor(n / 5) * 240
-				cx = x + 100
-				cy = y + 100
-				shapes.set(id, { id, type: 'sticky', x, y, w: 200, h: 200, text: s.text, color: s.color, drawnBy })
+				const col = columnOf(s.color)
+				const { x, y } = slotXY(col, nextRowInColumn(shapes, col))
+				cx = x + CARD_W / 2
+				cy = y + CARD_H / 2
+				shapes.set(id, { id, type: 'sticky', x, y, w: CARD_W, h: CARD_H, text: s.text, color: s.color, drawnBy })
 			})
 			newIds.push(id)
 			setMoriCursor(room, { x: cx, y: cy })
@@ -549,6 +558,26 @@ app.post('/api/rooms/:room/end', (req, res) => {
 	try {
 		if (existsSync(roomFile(name))) unlinkSync(roomFile(name))
 	} catch {}
+	res.json({ ok: true })
+})
+
+// Auto-arrange: re-lay every sticky into its kind-column, top-to-bottom (one-tap tidy).
+app.post('/api/rooms/:room/tidy', (req, res) => {
+	const room = getRoom(req.params.room)
+	const shapes = room.doc.getMap('shapes')
+	room.doc.transact(() => {
+		const rowByCol: Record<number, number> = {}
+		const list = [...shapes.values()]
+			.filter((s: any) => s.type === 'sticky')
+			.sort((a: any, b: any) => columnOf(a.color) - columnOf(b.color) || a.y - b.y || a.x - b.x)
+		for (const s of list as any[]) {
+			const col = columnOf(s.color)
+			const row = rowByCol[col] ?? 0
+			rowByCol[col] = row + 1
+			const { x, y } = slotXY(col, row)
+			shapes.set(s.id, { ...s, x, y })
+		}
+	})
 	res.json({ ok: true })
 })
 
