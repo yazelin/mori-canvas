@@ -5,3 +5,5 @@ dist/
 .data/
 certs/
 client/dist/
+server-rs/target/
+client/dist/
