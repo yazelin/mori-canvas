@@ -257,6 +257,19 @@ pub fn run_command(room: &Room, existing: &[ExistingCard], cmd: &AgentCommand, s
             }
             (format!("開了 {} 個區:{}", titles.len(), titles.join("、")), None)
         }
+        AgentCommand::Connect { from, to } => {
+            if let (Some(a), Some(b)) = (existing.get(*from), existing.get(*to)) {
+                let cid = format!("conn-{}", rid());
+                let doc = room.awareness.doc();
+                let connectors = doc.get_or_insert_map("connectors");
+                let mut txn = doc.transact_mut();
+                connectors.insert(&mut txn, cid.clone(), json_to_any(&json!({ "id": cid, "from": a.id, "to": b.id })));
+                drop(txn);
+                (format!("連起來:「{}」→「{}」", a.text, b.text), None)
+            } else {
+                ("連線失敗".into(), None)
+            }
+        }
     }
 }
 

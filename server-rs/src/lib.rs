@@ -3,6 +3,7 @@ mod apply;
 mod board_types;
 mod layout;
 mod llm;
+mod prompts;
 mod store;
 mod stt;
 mod sync;
@@ -313,7 +314,7 @@ async fn summary_markdown(room: &sync::Room, name: &str, local_only: bool, llm: 
         })
         .collect();
     let board = format!("便利貼(括號內是提出者):\n{}\n\n關聯:\n{}", lines.join("\n"), if rel.is_empty() { "(無)".to_string() } else { rel.join("\n") });
-    let sys = "你是會議記錄員。根據提供的白板便利貼(已分類)整理成一頁繁體中文會議紀錄,用這些區塊:## 會議重點 / ## 決議 / ## 待辦事項(若便利貼標了提出者,在待辦後標負責人)/ ## 風險 / ## 下一步。只根據提供內容,不得編造;沒有內容的區塊就省略。直接輸出 markdown,不要前言。";
+    let sys = prompts::prompt("summary");
     match llm::chat(&[llm::Msg { role: "system", content: sys.into() }, llm::Msg { role: "user", content: board }], false, local_only, llm).await {
         Ok((t, _)) => format!("# 會議摘要:{}\n\n{}\n", name, strip_think(&t)),
         Err(e) => format!("摘要失敗:{}", e),
