@@ -19,11 +19,11 @@ type Sticky = {
 type Connector = { id: string; from: string; to: string }
 
 const COLORS: Record<string, string> = {
-	yellow: '#f3cf6b', // topic
-	green: '#a6d6a1', // todo
-	blue: '#9cbce8', // decision
-	red: '#edaaa3', // risk
-	note: '#e3dcf2', // 備註 — annotation, addable to any diagram (lavender, off the 4 kinds)
+	yellow: '#f4d279', // topic
+	green: '#a9d6a0', // todo
+	blue: '#9ec1ea', // decision
+	red: '#efab9f', // risk
+	note: '#ddd1f1', // 備註 — annotation, addable to any diagram (lavender, off the 4 kinds)
 }
 // a darker tint of each, for the little "kind" accent dot on a card
 const KIND_ACCENT: Record<string, string> = {
@@ -32,6 +32,28 @@ const KIND_ACCENT: Record<string, string> = {
 	blue: '#4a72b8',
 	red: '#c46a61',
 	note: '#7c6bb0',
+}
+// canvas (Konva) can't read CSS vars, so the frame / handle / connectors / labels get
+// their own light+dark values here — keeps the board readable in dark mode.
+const CANVAS_LIGHT = {
+	frameFill: 'rgba(253,251,247,0.55)',
+	frameStroke: 'rgba(28,26,23,0.1)',
+	frameHeader: 'rgba(180,83,10,0.09)',
+	frameTitle: 'rgba(28,26,23,0.72)',
+	handle: 'rgba(28,26,23,0.16)',
+	handleStroke: 'rgba(28,26,23,0.28)',
+	conn: 'rgba(28,26,23,0.42)',
+	frameShadow: 'rgba(28,26,23,0.16)',
+}
+const CANVAS_DARK = {
+	frameFill: 'rgba(255,255,255,0.045)',
+	frameStroke: 'rgba(236,231,220,0.16)',
+	frameHeader: 'rgba(217,118,42,0.18)',
+	frameTitle: 'rgba(236,231,220,0.8)',
+	handle: 'rgba(236,231,220,0.14)',
+	handleStroke: 'rgba(236,231,220,0.34)',
+	conn: 'rgba(236,231,220,0.4)',
+	frameShadow: 'rgba(0,0,0,0.45)',
 }
 const CANVAS_FONT = "'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', system-ui, sans-serif"
 const KIND_LABEL: Record<string, string> = { yellow: '主題', green: '待辦', blue: '決議', red: '風險', note: '備註' }
@@ -163,6 +185,7 @@ export default function App() {
 		document.documentElement.setAttribute('data-theme', next)
 		try { localStorage.setItem('mc-theme', next) } catch {}
 	}
+	const ct = theme === 'dark' ? CANVAS_DARK : CANVAS_LIGHT // canvas (Konva) palette for this theme
 	const [selectedId, setSelectedId] = useState<string | null>(null)
 	const [selectedConnId, setSelectedConnId] = useState<string | null>(null)
 	const [filter, setFilter] = useState<{ type: 'tag' | 'owner'; value: string } | null>(null)
@@ -979,9 +1002,13 @@ export default function App() {
 								width={f.w}
 								height={f.h}
 								cornerRadius={18}
-								fill="rgba(255,255,255,0.32)"
-								stroke="rgba(28,26,23,0.16)"
+								fill={ct.frameFill}
+								stroke={ct.frameStroke}
 								strokeWidth={1.5}
+								shadowColor={ct.frameShadow}
+								shadowBlur={22}
+								shadowOpacity={0.6}
+								shadowOffsetY={7}
 								listening={false}
 							/>
 							{/* title bar = drag handle (moves frame + its cards); double-click to rename */}
@@ -991,7 +1018,7 @@ export default function App() {
 								width={f.w}
 								height={34}
 								cornerRadius={[18, 18, 0, 0]}
-								fill="rgba(180,83,10,0.1)"
+								fill={ct.frameHeader}
 								draggable
 								onDragMove={(e: any) => {
 									const dx = e.target.x() - f.x
@@ -1013,23 +1040,25 @@ export default function App() {
 								fontSize={14}
 								fontStyle="600"
 								fontFamily={CANVAS_FONT}
-								fill="rgba(28,26,23,0.66)"
+								fill={ct.frameTitle}
 								listening={false}
 							/>
-							{/* resize handle (bottom-right) */}
+							{/* resize handle (bottom-right) — themed corner grip */}
 							<Rect
-								x={f.x + f.w - 18}
-								y={f.y + f.h - 18}
-								width={16}
-								height={16}
-								cornerRadius={4}
-								fill="rgba(28,26,23,0.18)"
+								x={f.x + f.w - 20}
+								y={f.y + f.h - 20}
+								width={14}
+								height={14}
+								cornerRadius={[8, 4, 8, 4]}
+								fill={ct.handle}
+								stroke={ct.handleStroke}
+								strokeWidth={1.5}
 								draggable
 								onDragMove={(e: any) => {
-									const w = Math.max(280, e.target.x() - f.x + 18)
-									const h = Math.max(200, e.target.y() - f.y + 18)
+									const w = Math.max(280, e.target.x() - f.x + 20)
+									const h = Math.max(200, e.target.y() - f.y + 20)
 									patchFrame(f.id, { w, h })
-									e.target.position({ x: f.x + w - 18, y: f.y + h - 18 })
+									e.target.position({ x: f.x + w - 20, y: f.y + h - 20 })
 								}}
 								onMouseEnter={(e: any) => (e.target.getStage().container().style.cursor = 'nwse-resize')}
 								onMouseLeave={(e: any) => (e.target.getStage().container().style.cursor = 'default')}
@@ -1048,7 +1077,7 @@ export default function App() {
 						const sel = c.id === selectedConnId
 						// a connector spanning two different diagrams = a cross-reference, drawn dashed
 						const cross = a.frameId && b.frameId && a.frameId !== b.frameId
-						const baseColor = cross ? 'rgba(124,58,160,0.6)' : 'rgba(28,26,23,0.4)'
+						const baseColor = cross ? (theme === 'dark' ? 'rgba(167,139,250,0.7)' : 'rgba(124,58,160,0.6)') : ct.conn
 						// hierarchical diagrams use orthogonal "axis" elbow lines
 						const frame = a.frameId && a.frameId === b.frameId ? frames.find((f) => f.id === a.frameId) : null
 						const tdir = frame ? WB_TREE_DIR[frame.type] : null
