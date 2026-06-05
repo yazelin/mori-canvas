@@ -277,6 +277,15 @@ export default function App() {
 	useEffect(() => {
 		transcriptEndRef.current?.scrollIntoView({ block: 'nearest' })
 	}, [transcript.length])
+	// keep-alive: while this page is open, ping the server every 5 min so a free host
+	// (e.g. Render) doesn't spin the instance down mid-meeting. (Doesn't help the first
+	// cold start when nobody is on the page — that needs an external cron.)
+	useEffect(() => {
+		const id = setInterval(() => {
+			fetch(`${SYNC_HTTP}/api/health`, { cache: 'no-store' }).catch(() => {})
+		}, 5 * 60 * 1000)
+		return () => clearInterval(id)
+	}, [])
 	useEffect(() => {
 		localStorage.setItem('wb-name', myName)
 		;(provider as any).awareness.setLocalStateField('user', me)
