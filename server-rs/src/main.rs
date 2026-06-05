@@ -73,7 +73,6 @@ struct Settings {
     #[serde(rename = "whisperUrl")]
     whisper_url: String,
 }
-static AGENT_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 static SETTINGS: Lazy<Mutex<Settings>> = Lazy::new(|| {
     Mutex::new(Settings {
         spacing: 1.0,
@@ -176,6 +175,65 @@ fn export_markdown(room: &sync::Room) -> String {
     md
 }
 
+fn strip_think(s: &str) -> String {
+    let mut out = s.to_string();
+    while let (Some(a), Some(b)) = (out.find("<think>"), out.find("</think>")) {
+        if b > a {
+            out.replace_range(a..b + "</think>".len(), "");
+        } else {
+            break;
+        }
+    }
+    out.trim().to_string()
+}
+
+// one-page meeting note via the LLM (port of /api/summary)
+async fn summary_markdown(room: &sync::Room, name: &str, local_only: bool) -> String {
+    let shapes: Vec<Value> = store::read_map(room, "shapes").into_iter().filter(|s| s.get("type").and_then(|v| v.as_str()) == Some("sticky")).collect();
+    let conns = store::read_map(room, "connectors");
+    if shapes.is_empty() {
+        return format!("# 會議摘要:{}\n\n(白板還沒有內容)\n", name);
+    }
+    let kind = |c: &str| match c {
+        "yellow" => "主題",
+        "green" => "待辦",
+        "blue" => "決議",
+        "red" => "風險",
+        _ => "其他",
+    };
+    let named = |s: &Value| -> String {
+        match s.get("drawnBy").and_then(|v| v.as_str()) {
+            Some(d) if !["user", "agent", "voice", "bot"].contains(&d) => format!("({})", d),
+            _ => String::new(),
+        }
+    };
+    let lines: Vec<String> = shapes
+        .iter()
+        .map(|s| format!("- [{}] {}{}", kind(s.get("color").and_then(|v| v.as_str()).unwrap_or("yellow")), s.get("text").and_then(|v| v.as_str()).unwrap_or(""), named(s)))
+        .collect();
+    let text = |id: &str| -> Option<String> { shapes.iter().find(|s| s.get("id").and_then(|v| v.as_str()) == Some(id)).and_then(|s| s.get("text").and_then(|v| v.as_str())).map(|x| x.to_string()) };
+    let rel: Vec<String> = conns
+        .iter()
+        .filter_map(|c| {
+            let f = text(c.get("from").and_then(|v| v.as_str())?)?;
+            let t = text(c.get("to").and_then(|v| v.as_str())?)?;
+            Some(format!("- {} → {}", f, t))
+        })
+        .collect();
+    let board = format!("便利貼(括號內是提出者):\n{}\n\n關聯:\n{}", lines.join("\n"), if rel.is_empty() { "(無)".to_string() } else { rel.join("\n") });
+    let sys = "你是會議記錄員。根據提供的白板便利貼(已分類)整理成一頁繁體中文會議紀錄,用這些區塊:## 會議重點 / ## 決議 / ## 待辦事項(若便利貼標了提出者,在待辦後標負責人)/ ## 風險 / ## 下一步。只根據提供內容,不得編造;沒有內容的區塊就省略。直接輸出 markdown,不要前言。";
+    match llm::chat(&[llm::Msg { role: "system", content: sys.into() }, llm::Msg { role: "user", content: board }], false, local_only).await {
+        Ok((t, _)) => format!("# 會議摘要:{}\n\n{}\n", name, strip_think(&t)),
+        Err(e) => format!("摘要失敗:{}", e),
+    }
+}
+
+// per-room serialization lock (replaces the global lock)
+static ROOM_LOCKS: Lazy<Mutex<HashMap<String, Arc<Mutex<()>>>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+async fn room_lock(name: &str) -> Arc<Mutex<()>> {
+    ROOM_LOCKS.lock().await.entry(name.to_string()).or_insert_with(|| Arc::new(Mutex::new(()))).clone()
+}
+
 #[tokio::main]
 async fn main() {
     let rooms = sync::new_rooms();
@@ -274,6 +332,15 @@ async fn main() {
         Ok::<_, warp::Rejection>(warp::reply::with_header(md, "Content-Type", "text/markdown; charset=utf-8"))
     });
 
+    // GET /api/summary/:room — one-page meeting note via the LLM
+    let r_summary = rooms.clone();
+    let summary = warp::get().and(warp::path!("api" / "summary" / String)).and(with(r_summary)).and_then(|name: String, rooms: sync::Rooms| async move {
+        let room = sync::get_or_create_room(&rooms, &name).await;
+        let lo = SETTINGS.lock().await.local_only;
+        let md = summary_markdown(&room, &name, lo).await;
+        Ok::<_, warp::Rejection>(warp::reply::with_header(md, "Content-Type", "text/markdown; charset=utf-8"))
+    });
+
     // GET/POST /api/settings
     let settings_get = warp::get().and(warp::path!("api" / "settings")).and_then(|| async move {
         let s = SETTINGS.lock().await.clone();
@@ -324,7 +391,7 @@ async fn main() {
         let by: String = body.get("by").and_then(|v| v.as_str()).unwrap_or("agent").chars().take(24).collect();
         let room = sync::get_or_create_room(&rooms, &name).await;
         let s = SETTINGS.lock().await.clone();
-        let _guard = AGENT_LOCK.lock().await; // serialize agent turns (per-room race guard)
+        let _lk = room_lock(&name).await; let _guard = _lk.lock().await; // serialize agent turns (per-room race guard)
         let res = apply::run_agent_turn(&room, &transcript, &by, s.local_only, s.auto_tidy, s.spacing).await;
         Ok(match res {
             Ok(v) => warp::reply::json(&v),
@@ -363,7 +430,7 @@ async fn main() {
             }
             let by: String = q.get("by").map(|s| s.as_str()).unwrap_or("voice").chars().take(24).collect();
             let room = sync::get_or_create_room(&rooms, &name).await;
-            let _guard = AGENT_LOCK.lock().await;
+            let _lk = room_lock(&name).await; let _guard = _lk.lock().await;
             let mut res = match apply::run_agent_turn(&room, &transcript, &by, s.local_only, s.auto_tidy, s.spacing).await {
                 Ok(v) => v,
                 Err(e) => json!({ "ok": false, "error": e }),
@@ -391,7 +458,7 @@ async fn main() {
                 return Ok(warp::reply::json(&json!({ "ok": true, "transcript": "", "edit": {} })));
             }
             let (text, owner, tags) = cur.unwrap();
-            let _guard = AGENT_LOCK.lock().await;
+            let _lk = room_lock(&name).await; let _guard = _lk.lock().await;
             let edit = match agent::plan_card_edit(&transcript, &text, owner.as_deref(), tags.as_deref(), s.local_only).await {
                 Ok(e) => e,
                 Err(e) => return Ok(warp::reply::json(&json!({ "ok": false, "error": e, "transcript": transcript }))),
@@ -428,6 +495,7 @@ async fn main() {
         .or(frames_get)
         .or(frames_post)
         .or(export)
+        .or(summary)
         .or(settings_get)
         .or(settings_post);
 
