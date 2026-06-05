@@ -1,7 +1,7 @@
 //! Port of agent.ts — meeting transcript -> board plan OR a voice command, with
 //! intent classification, frames, lenient JSON parsing. Uses the Groq->Ollama cascade.
 use crate::board_types::{board_type, types_brief};
-use crate::llm::{chat, Msg};
+use crate::llm::{chat, LlmOpts, Msg};
 use serde_json::Value;
 
 pub fn color_by_kind(kind: &str) -> Option<&'static str> {
@@ -67,6 +67,8 @@ pub enum AgentCommand {
     Recolor { index: usize, kind: String },
     Tag { index: usize, tags: Vec<String> },
     Edit { index: usize, text: String },
+    Move { index: usize, frame: usize },
+    Zones { titles: Vec<String> },
 }
 pub enum AgentResult {
     Content(BoardPlan),
@@ -96,7 +98,7 @@ pub struct CardEdit {
     pub color: Option<String>,
 }
 
-const SYSTEM: &str = "你是會議白板助手。每次收到「使用者這段話」+「目前白板現況」。先判斷這段話的 intent 是「指令(command)」還是「會議內容(content)」,再輸出對應 JSON。只輸出一個 JSON 物件(不要說明文字、不要 markdown 圍欄、不要 <think>)。\n\n【第一步:判斷 intent】\n- command(指令)=使用者在叫你「操作白板」:整理/排版、只看某人或某標籤、顯示全部、把某張卡指派給某人、把某張卡改成某類型/加標籤/改寫文字。多半是祈使句、簡短、針對白板本身。\n- content(內容)=會議討論的實質內容(要被整理成便利貼的)。\n- 拿不準就當 content。\n\n【若是 command】輸出 { \"intent\":\"command\", \"command\": <下列擇一> }\n- 整理 / 排版 / 排好 / 排一排:      { \"action\":\"tidy\" }\n- 只看某人 / 看某人的:              { \"action\":\"filter\", \"by\":\"owner\", \"value\":\"<人名>\" }\n- 只看某標籤:                       { \"action\":\"filter\", \"by\":\"tag\", \"value\":\"<標籤>\" }\n- 顯示全部 / 取消篩選 / 看全部:     { \"action\":\"clearFilter\" }\n- 把第 N 張指派給某人 / 交給某人:   { \"action\":\"assign\", \"index\":<既有卡索引>, \"owner\":\"<人名>\" }\n- 把第 N 張改成某類型:             { \"action\":\"recolor\", \"index\":<既有卡索引>, \"kind\":\"topic|todo|decision|risk\" }\n- 把第 N 張加上標籤:               { \"action\":\"tag\", \"index\":<既有卡索引>, \"tags\":[\"<標籤>\"] }\n- 把第 N 張的文字改寫成…:          { \"action\":\"edit\", \"index\":<既有卡索引>, \"text\":\"<新文字,≤14字>\" }\nindex 一律用下方「目前白板」清單的索引(找最符合使用者描述的那張)。「改成<類型>」用 recolor;「改寫成<文字>」用 edit。\n\n【若是 content】輸出 { \"intent\":\"content\", \"frame\":<見下>, \"stickies\":[ { \"text\":\"<繁中短語,最多14字>\", \"color\":\"yellow|green|blue|red\", \"owner\":\"<可省略>\", \"tags\":[\"<標籤>\"] } ], \"connectors\":[ { \"from\":<索引>, \"to\":<索引> } ], \"updates\":[...], \"deletes\":[...] }\n\n【frame —— 這段內容要畫進哪張圖】一個會議的畫布上可以有多張圖(frame)。\n- 屬於某張現有圖框: \"frame\": <圖框索引(整數)>\n- 新主題或需要不同圖型: \"frame\": { \"new\": { \"type\": \"<板型>\", \"title\": \"<標題>\" } };板型 type 可選 meeting/orgchart/flow/architecture/mindmap/kanban/swot/timeline/fishbone/gantt。\n- 沒有任何圖框時:第一段內容一定要開新圖(用 new)。\n- updates/deletes 用既有卡的全域索引。新 stickies 與 connectors 的索引接在既有卡之後。\n\ncontent 規則:\n- 卡片的分類、配色(color)、連線方向與意義、owner/tags 用途,一律依使用者訊息中的【板型說明】解讀。\n- 每次最多 6 張。text 是精簡繁中短語,別超過 14 字。\n- connectors 用 from/to(從 0 起,分開兩個整數),把相關的卡接起來(組織/流程/架構圖務必接成完整的樹/鏈)。\n- owner / tags 沒有就省略,別亂猜。\n- 既有卡被推翻/完成/講錯才動:updates [{index,text,kind}]、deletes [index]。\n\n範例:「幫我排一下」→ {\"intent\":\"command\",\"command\":{\"action\":\"tidy\"}};「只看亞澤的」→ {\"intent\":\"command\",\"command\":{\"action\":\"filter\",\"by\":\"owner\",\"value\":\"亞澤\"}};空白板講內容 → {\"intent\":\"content\",\"frame\":{\"new\":{\"type\":\"meeting\",\"title\":\"\"}},\"stickies\":[{\"text\":\"線上預約系統\",\"color\":\"yellow\"}],\"connectors\":[]}";
+const SYSTEM: &str = "你是會議白板助手。每次收到「使用者這段話」+「目前白板現況」。先判斷這段話的 intent 是「指令(command)」還是「會議內容(content)」,再輸出對應 JSON。只輸出一個 JSON 物件(不要說明文字、不要 markdown 圍欄、不要 <think>)。\n\n【最重要:先認出『使用者指的是哪一張既有卡』】使用者很常提到一張『已經在板上的卡片』,用三種方式指涉:(a)內容 —「定價那張」「關於庫存的」「線上預約那個」;(b)順序 —「剛剛那張」「最後一張」「第一張」;(c)編號 —「3號卡片」「把3號…」對應下方清單『卡上編號N』那張(卡上編號從1)。你輸出 JSON 的 index 一律用那一行最前面的『索引』數字(索引從0,所以『3號』= 索引2)。**你必須先從下方清單用『內容比對』找出那是哪一張(它的全域索引),然後針對那一張去改(用指令或 updates) —— 絕對不要因此新建一張重複的卡!** 只有當內容是清單裡完全沒有、真的全新的東西,才建新卡。\n特別注意:「把X改成/換成Y」「X那張改成Y」「X要改」= 先找出 X 那張的索引,再用 edit(改文字)或 recolor(改類型),**不是新建一張 Y**。\n\n【第一步:判斷 intent】\n- command(指令)=操作白板上『既有的東西』:整理/排版、只看某人或標籤、顯示全部、把某張卡指派/改類型/加標籤/改寫文字/移到某區。多半是祈使句、針對既有卡。\n- content(內容)=會議討論的『新』實質內容(要新增成便利貼的)。\n- 若這段話是在講某張既有卡要怎麼改/移/派,一律當 command;拿不準才當 content。\n\n【若是 command】輸出 { \"intent\":\"command\", \"command\": <下列擇一> }\n- 整理 / 排版 / 排好:                { \"action\":\"tidy\" }\n- 只看某人 / 看某人的:              { \"action\":\"filter\", \"by\":\"owner\", \"value\":\"<人名>\" }\n- 只看某標籤:                       { \"action\":\"filter\", \"by\":\"tag\", \"value\":\"<標籤>\" }\n- 顯示全部 / 取消篩選:              { \"action\":\"clearFilter\" }\n- 把某張卡指派給某人 / 交給某人:    { \"action\":\"assign\", \"index\":<既有卡索引>, \"owner\":\"<人名>\" }\n- 把某張卡改成某類型:               { \"action\":\"recolor\", \"index\":<既有卡索引>, \"kind\":\"topic|todo|decision|risk\" }\n- 把某張卡加上標籤:                 { \"action\":\"tag\", \"index\":<既有卡索引>, \"tags\":[\"<標籤>\"] }\n- 把某張卡的文字改寫成…:            { \"action\":\"edit\", \"index\":<既有卡索引>, \"text\":\"<新文字,≤14字>\" }\n- 把某張卡移到某個區/圖框:          { \"action\":\"move\", \"index\":<既有卡索引>, \"frame\":<圖框索引> }(例:「庫存那張討論完了,移到已討論」→ 找出庫存那張的索引 + 已討論那個圖框的索引)\n- 一次開好幾個命名區/分區/欄:        { \"action\":\"zones\", \"titles\":[\"臨時動議\",\"會議進程\",\"待討論\"] }(例:「開三個區:臨時動議、會議進程、待討論」「分成 待討論/已討論/待完成 三塊」「先建幾個討論區」)\nindex 一律是下方清單的全域索引,用內容/順序/編號比對找出最符合的那張。\n\n【若是 content】輸出 { \"intent\":\"content\", \"frame\":<見下>, \"stickies\":[ { \"text\":\"<繁中短語,最多14字>\", \"color\":\"yellow|green|blue|red\", \"owner\":\"<可省略>\", \"tags\":[\"<標籤>\"] } ], \"connectors\":[ { \"from\":<索引>, \"to\":<索引> } ], \"updates\":[...], \"deletes\":[...] }\n\n【frame —— 這段內容要畫進哪張圖】一個會議的畫布上可以有多張圖(frame)。\n- 屬於某張現有圖框: \"frame\": <圖框索引(整數)>\n- 新主題或需要不同圖型: \"frame\": { \"new\": { \"type\": \"<板型>\", \"title\": \"<標題>\" } };板型 type 可選 meeting/orgchart/flow/architecture/mindmap/kanban/swot/timeline/fishbone/gantt。\n- 沒有任何圖框時:第一段內容一定要開新圖(用 new)。\n- updates/deletes 用既有卡的全域索引。新 stickies 與 connectors 的索引接在既有卡之後。\n\ncontent 規則:\n- 卡片的分類、配色(color)、連線方向與意義、owner/tags 用途,一律依使用者訊息中的【板型說明】解讀。\n- 每次最多 6 張。text 是精簡繁中短語,別超過 14 字。\n- connectors 用 from/to(從 0 起,分開兩個整數),把相關的卡接起來(組織/流程/架構圖務必接成完整的樹/鏈)。\n- owner / tags 沒有就省略,別亂猜。\n- 既有卡被推翻/完成/講錯才動:updates [{index,text,kind}]、deletes [index]。再次提醒:要『改既有卡』就用 updates 或 command,別重複建一張。\n\n範例:「幫我排一下」→ {\"intent\":\"command\",\"command\":{\"action\":\"tidy\"}};「把定價那張改成季繳方案」→ {\"intent\":\"command\",\"command\":{\"action\":\"edit\",\"index\":<定價那張的索引>,\"text\":\"季繳方案\"}};「庫存那張討論完了移到已討論」→ {\"intent\":\"command\",\"command\":{\"action\":\"move\",\"index\":<庫存那張>,\"frame\":<已討論圖框索引>}};空白板講內容 → {\"intent\":\"content\",\"frame\":{\"new\":{\"type\":\"meeting\",\"title\":\"\"}},\"stickies\":[{\"text\":\"線上預約系統\",\"color\":\"yellow\"}],\"connectors\":[]}";
 
 fn extract_json(raw: &str) -> Option<Value> {
     let mut s = raw.to_string();
@@ -244,6 +246,27 @@ fn sanitize_command(c: &Value, existing_count: usize) -> Option<AgentCommand> {
                 None
             }
         }
+        "move" => {
+            let i = c.get("index").and_then(to_idx)?;
+            let frame = c.get("frame").and_then(to_idx)?;
+            if in_range(i) && frame >= 0 {
+                Some(AgentCommand::Move { index: i as usize, frame: frame as usize })
+            } else {
+                None
+            }
+        }
+        "zones" => {
+            let titles: Vec<String> = c
+                .get("titles")
+                .and_then(|v| v.as_array())
+                .map(|a| a.iter().filter_map(|t| t.as_str()).map(|t| t.trim()).filter(|t| !t.is_empty()).take(8).map(|t| t.chars().take(20).collect()).collect())
+                .unwrap_or_default();
+            if titles.is_empty() {
+                None
+            } else {
+                Some(AgentCommand::Zones { titles })
+            }
+        }
         _ => None,
     }
 }
@@ -261,7 +284,7 @@ fn parse_result(raw: &str, existing_count: usize) -> AgentResult {
     AgentResult::Content(parse_content_plan(&obj, existing_count))
 }
 
-pub async fn plan_agent(transcript: &str, existing: &[ExistingCard], topic: &str, frames: &[FrameInfo], context: &[String], local_only: bool) -> Result<(AgentResult, String), String> {
+pub async fn plan_agent(transcript: &str, existing: &[ExistingCard], topic: &str, frames: &[FrameInfo], context: &[String], local_only: bool, llm: &LlmOpts) -> Result<(AgentResult, String), String> {
     let topic_block = if topic.is_empty() { String::new() } else { format!("\n會議主題:「{}」", topic) };
     let frames_block = if frames.is_empty() {
         "\n\n目前畫布上沒有任何圖框(content 的第一段請用 \"frame\":{\"new\":{...}} 開一張新圖)。".to_string()
@@ -285,7 +308,7 @@ pub async fn plan_agent(transcript: &str, existing: &[ExistingCard], topic: &str
                     meta.push(format!("#{}", t.join(" #")));
                 }
             }
-            format!("  {}. {}[{}] {}", i, fi, meta.join(" "), c.text)
+            format!("  索引{} (卡上編號{}): {}[{}] {}", i, i + 1, fi, meta.join(" "), c.text)
         }).collect();
         format!("\n\n目前所有便利貼(全域索引 0..{}):\n{}\n(新增便利貼索引從 {} 開始)", existing.len().saturating_sub(1), lst.join("\n"), existing.len())
     };
@@ -296,11 +319,11 @@ pub async fn plan_agent(transcript: &str, existing: &[ExistingCard], topic: &str
     };
     let user = format!("使用者這段話(三引號內,可能是會議內容、也可能是給你的指令):\n\"\"\"\n{}\n\"\"\"{}{}{}{}{}", transcript, ctx_block, topic_block, frames_block, ref_block, existing_block);
     let messages = vec![Msg { role: "system", content: SYSTEM.to_string() }, Msg { role: "user", content: user }];
-    let (text, provider) = chat(&messages, true, local_only).await?;
+    let (text, provider) = chat(&messages, true, local_only, llm).await?;
     Ok((parse_result(&text, existing.len()), provider))
 }
 
-pub async fn plan_card_edit(transcript: &str, text: &str, owner: Option<&str>, tags: Option<&[String]>, local_only: bool) -> Result<CardEdit, String> {
+pub async fn plan_card_edit(transcript: &str, text: &str, owner: Option<&str>, tags: Option<&[String]>, local_only: bool, llm: &LlmOpts) -> Result<CardEdit, String> {
     let sys = "使用者用語音口述要修改一張便利貼。只輸出一個 JSON,只包含「要更新的欄位」(沒提到的欄位一律不要出現):\n{ \"text\":\"<新文字,繁中短語≤14字>\", \"tags\":[\"<標籤>\"], \"owner\":\"<負責人姓名>\", \"kind\":\"topic|todo|decision|risk\" }\n判斷:口述描述/重寫內容→text;提到標籤/歸類→tags(整組取代);提到負責人/指派/交給→owner;提到決議/待辦/風險/主題→kind。一句可同時改多欄。沒提到的欄位絕對不要放。只輸出 JSON。";
     let mut meta = vec![format!("文字「{}」", text)];
     if let Some(o) = owner {
@@ -312,7 +335,7 @@ pub async fn plan_card_edit(transcript: &str, text: &str, owner: Option<&str>, t
         }
     }
     let user = format!("這張便利貼目前:{}。\n口述修改(三引號內):\n\"\"\"\n{}\n\"\"\"", meta.join(","), transcript);
-    let (out, _p) = chat(&[Msg { role: "system", content: sys.to_string() }, Msg { role: "user", content: user }], true, local_only).await?;
+    let (out, _p) = chat(&[Msg { role: "system", content: sys.to_string() }, Msg { role: "user", content: user }], true, local_only, llm).await?;
     let mut edit = CardEdit::default();
     if let Some(obj) = extract_json(&out) {
         if let Some(t) = obj.get("text").and_then(|v| v.as_str()).filter(|s| !s.trim().is_empty()) {

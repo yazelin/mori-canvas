@@ -197,6 +197,17 @@ export default function App() {
 	}
 	const ct = theme === 'dark' ? CANVAS_DARK : CANVAS_LIGHT // canvas (Konva) palette for this theme
 	const [selectedId, setSelectedId] = useState<string | null>(null)
+	// each card's editor number (1-based) — same id-sorted order the agent sees, so you can
+	// say "把 3 號移到…" as a precise fallback when the AI can't infer which card you mean
+	const cardNum = useMemo(() => {
+		const m: Record<string, number> = {}
+		shapes
+			.filter((s: any) => s.type === 'sticky' && !s.note)
+			.slice()
+			.sort((a: any, b: any) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+			.forEach((s: any, i: number) => (m[s.id] = i + 1))
+		return m
+	}, [shapes])
 	const [selectedConnId, setSelectedConnId] = useState<string | null>(null)
 	const [filter, setFilter] = useState<{ type: 'tag' | 'owner'; value: string } | null>(null)
 	const [connectMode, setConnectMode] = useState(false)
@@ -225,6 +236,18 @@ export default function App() {
 	const [pngTransparent, setPngTransparent] = useState(false)
 	const [settingsOpen, setSettingsOpen] = useState(false)
 	const [settings, setSettings] = useState({ localOnly: false, groqKey: true, spacing: 1, autoTidy: true, mode: 'mori', sttSource: 'local', whisperUrl: '' })
+	// bring your own AI: any OpenAI-compatible base + key + model -> visitor's own quota
+	const [byo, setByo] = useState(() => ({ base: localStorage.getItem('wb-llm-base') || '', key: localStorage.getItem('wb-llm-key') || '', model: localStorage.getItem('wb-llm-model') || '' }))
+	const saveByo = (patch: Partial<typeof byo>) =>
+		setByo((b) => {
+			const n = { ...b, ...patch }
+			localStorage.setItem('wb-llm-base', n.base)
+			localStorage.setItem('wb-llm-key', n.key)
+			localStorage.setItem('wb-llm-model', n.model)
+			return n
+		})
+	const byoHeaders = (): Record<string, string> =>
+		byo.base.trim() && byo.key.trim() && byo.model.trim() ? { 'X-LLM-Base': byo.base.trim(), 'X-LLM-Key': byo.key.trim(), 'X-LLM-Model': byo.model.trim() } : {}
 	const [sponsor, setSponsor] = useState<{ url?: string; label?: string; notice?: string }>({})
 	const [sponsorHidden, setSponsorHidden] = useState(false)
 	const [caps, setCaps] = useState({ moriEar: true, whisperServer: true, groqKey: true })
@@ -234,6 +257,12 @@ export default function App() {
 
 	// presence: my identity (persistent name + colour) + everyone else's cursors
 	const [myName, setMyName] = useState(() => localStorage.getItem('wb-name') || '訪客-' + genCode(3))
+	// prompt for a real name on entry (so people aren't all anonymous '訪客-XXX' in a meeting)
+	const [needName, setNeedName] = useState(() => {
+		const n = localStorage.getItem('wb-name')
+		return !n || n.startsWith('訪客')
+	})
+	const [nameDraft, setNameDraft] = useState('')
 	const myColor = useMemo(
 		() => ['#e11d48', '#0891b2', '#ea580c', '#16a34a', '#9333ea'][Math.floor(Math.random() * 5)],
 		[]
@@ -351,7 +380,7 @@ export default function App() {
 		}
 		let summaryMd = ''
 		try {
-			summaryMd = await fetch(`${SYNC_HTTP}/api/summary/${encodeURIComponent(room)}`).then((x) => x.text())
+			summaryMd = await fetch(`${SYNC_HTTP}/api/summary/${encodeURIComponent(room)}`, { headers: byoHeaders() }).then((x) => x.text())
 		} catch {
 			summaryMd = '(摘要產生失敗)'
 		}
@@ -399,7 +428,7 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 	async function saveSettings(patch: Partial<typeof settings>) {
 		const r = await fetch(`${SYNC_HTTP}/api/settings`, {
 			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
+			headers: { 'Content-Type': 'application/json', ...byoHeaders() },
 			body: JSON.stringify(patch),
 		})
 			.then((x) => x.json())
@@ -414,7 +443,7 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 	async function setBoardType(key: string, topic?: string) {
 		await fetch(`${SYNC_HTTP}/api/rooms/${encodeURIComponent(room)}/meta`, {
 			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
+			headers: { 'Content-Type': 'application/json', ...byoHeaders() },
 			body: JSON.stringify({ type: key, ...(topic !== undefined ? { topic } : {}) }),
 		}).catch(() => {})
 		tidy()
@@ -735,7 +764,7 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 	async function addFrame(type: string, title: string) {
 		await fetch(`${SYNC_HTTP}/api/rooms/${encodeURIComponent(room)}/frames`, {
 			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
+			headers: { 'Content-Type': 'application/json', ...byoHeaders() },
 			body: JSON.stringify({ type, title }),
 		}).catch(() => {})
 	}
@@ -746,7 +775,7 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 		try {
 			const r = await fetch(`${SYNC_HTTP}/api/agent/${encodeURIComponent(room)}`, {
 				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
+				headers: { 'Content-Type': 'application/json', ...byoHeaders() },
 				body: JSON.stringify({ transcript: agentText, by: me.name }),
 			}).then((x) => x.json())
 			applyAgentResponse(r)
@@ -791,7 +820,7 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 				// AI understands the speech and updates this card's text / tags / owner / kind
 				const r = await fetch(`${SYNC_HTTP}/api/card/${encodeURIComponent(room)}/${encodeURIComponent(id)}?ext=${ext}`, {
 					method: 'POST',
-					headers: { 'Content-Type': type },
+					headers: { 'Content-Type': type, ...byoHeaders() },
 					body: new Blob(chunks, { type }),
 				}).then((x) => x.json())
 				if (r.ok) {
@@ -826,7 +855,7 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 		setSegCount((c) => c + 1)
 		fetch(`${SYNC_HTTP}/api/voice/${encodeURIComponent(room)}?ext=${ext}&by=${encodeURIComponent(me.name)}`, {
 			method: 'POST',
-			headers: { 'Content-Type': type },
+			headers: { 'Content-Type': type, ...byoHeaders() },
 			body: blob,
 		})
 			.then((x) => x.json())
@@ -971,7 +1000,7 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 			try {
 				const r = await fetch(
 					`${SYNC_HTTP}/api/voice/${encodeURIComponent(room)}?ext=${ext}&by=${encodeURIComponent(me.name)}`,
-					{ method: 'POST', headers: { 'Content-Type': type }, body: blob }
+					{ method: 'POST', headers: { 'Content-Type': type, ...byoHeaders() }, body: blob }
 				).then((x) => x.json())
 				showSubtitle(r.transcript)
 				logTranscript(r.transcript)
@@ -1002,7 +1031,7 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 			applyAgentResponse(
 				await fetch(`${SYNC_HTTP}/api/agent/${encodeURIComponent(room)}`, {
 					method: 'POST',
-					headers: { 'Content-Type': 'application/json' },
+					headers: { 'Content-Type': 'application/json', ...byoHeaders() },
 					body: JSON.stringify({ transcript: t, by: me.name }),
 				}).then((x) => x.json())
 			),
@@ -1011,8 +1040,43 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 
 	return (
 		<div className="board-bg" style={{ position: 'fixed', inset: 0 }}>
+			{/* name gate — ask for a real name before joining (shows over everything) */}
+			{needName && (
+				<div className="scrim" style={{ zIndex: 3800 }}>
+					<div className="dialog-card modal-in" style={{ width: 'min(380px, 92vw)', textAlign: 'center' }}>
+						<div style={{ fontSize: 30, lineHeight: 1, marginBottom: 8 }}>👋</div>
+						<div style={{ fontWeight: 700, fontSize: 18 }}>歡迎加入會議</div>
+						<div className="muted" style={{ fontSize: 13, margin: '6px 0 16px' }}>先打個名字,白板上的卡片與游標才標得出是你</div>
+						<input
+							autoFocus
+							value={nameDraft}
+							onChange={(e) => setNameDraft(e.target.value.slice(0, 24))}
+							onKeyDown={(e) => {
+								if (e.key === 'Enter' && nameDraft.trim()) {
+									setMyName(nameDraft.trim())
+									setNeedName(false)
+								}
+							}}
+							placeholder="你的名字"
+							style={{ width: '100%', fontSize: 16, padding: '10px 12px', textAlign: 'center' }}
+						/>
+						<button
+							className="btn-accent"
+							disabled={!nameDraft.trim()}
+							style={{ width: '100%', marginTop: 12, padding: '11px', fontSize: 15, fontWeight: 600 }}
+							onClick={() => {
+								setMyName(nameDraft.trim())
+								setNeedName(false)
+							}}
+						>
+							進入會議
+						</button>
+					</div>
+				</div>
+			)}
+
 			{/* first-run onboarding / help */}
-			{guide && (
+			{guide && !needName && (
 				<div
 					style={{
 						position: 'fixed',
@@ -1282,6 +1346,10 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 								/>
 								{/* kind accent dot */}
 								<Circle x={18} y={18} radius={5} fill={KIND_ACCENT[s.color] ?? '#1c1a17'} opacity={0.8} />
+								{/* editor number (fallback handle: "把 N 號…") — not on notes */}
+								{!(s as any).note && cardNum[s.id] && (
+									<Text x={s.w - 30} y={11} width={20} align="right" text={String(cardNum[s.id])} fontSize={12} fontStyle="600" fontFamily={CANVAS_FONT} fill="rgba(28,26,23,0.4)" listening={false} />
+								)}
 								<Text
 									text={s.text}
 									width={s.w}
@@ -1674,6 +1742,15 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 							<input type="checkbox" checked={settings.autoTidy} onChange={(e) => saveSettings({ autoTidy: e.target.checked })} />
 							AI 加完內容後自動重排(關掉的話卡片留原地,要自己按「自動排列」)
 						</label>
+
+						<div style={{ borderTop: '1px solid var(--line)', margin: '14px 0 10px', paddingTop: 12 }}>
+							<div style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>用你自己的 AI(選填)</div>
+							<div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>填了就用你自己的額度,不耗站長的。任何 OpenAI 相容服務都行(OpenAI / Groq / Gemini / Azure / OpenRouter / 本機 Ollama);三格都填才生效,留空就用站長預設。</div>
+							<input value={byo.base} onChange={(e) => saveByo({ base: e.target.value })} placeholder="API Base URL,例 https://api.openai.com/v1" style={{ width: '100%', fontSize: 12, marginBottom: 6 }} />
+							<input value={byo.key} onChange={(e) => saveByo({ key: e.target.value })} type="password" placeholder="API Key(只存你瀏覽器,逐次請求帶上)" style={{ width: '100%', fontSize: 12, marginBottom: 6 }} />
+							<input value={byo.model} onChange={(e) => saveByo({ model: e.target.value })} placeholder="Model,例 gpt-4o-mini / gemini-2.0-flash" style={{ width: '100%', fontSize: 12 }} />
+							<div className="muted" style={{ fontSize: 11, marginTop: 6 }}>{byo.base.trim() && byo.key.trim() && byo.model.trim() ? '✓ 已啟用你自己的 AI' : '目前用站長預設的 AI'}</div>
+						</div>
 
 						<button style={{ width: '100%' }} onClick={() => setSettingsOpen(false)}>
 							關閉

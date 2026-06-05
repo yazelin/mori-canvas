@@ -240,6 +240,23 @@ pub fn run_command(room: &Room, existing: &[ExistingCard], cmd: &AgentCommand, s
                 ("改寫失敗".into(), None)
             }
         }
+        AgentCommand::Move { index, frame } => {
+            let frames = frames_info(room);
+            if let (Some(c), Some(f)) = (existing.get(*index), frames.get(*frame)) {
+                let fid = f.id.clone();
+                patch(&c.id, &|v| v["frameId"] = json!(fid));
+                tidy_board(room, spacing);
+                (format!("「{}」移到「{}」", c.text, f.title), None)
+            } else {
+                ("移動失敗".into(), None)
+            }
+        }
+        AgentCommand::Zones { titles } => {
+            for t in titles {
+                store::create_frame(room, "meeting", t);
+            }
+            (format!("開了 {} 個區:{}", titles.len(), titles.join("、")), None)
+        }
     }
 }
 
@@ -278,12 +295,12 @@ pub fn apply_card_edit(room: &Room, card_id: &str, edit: &crate::agent::CardEdit
     }
 }
 
-pub async fn run_agent_turn(room: &Room, transcript: &str, by: &str, local_only: bool, auto_tidy: bool, spacing: f64) -> Result<Value, String> {
+pub async fn run_agent_turn(room: &Room, transcript: &str, by: &str, local_only: bool, auto_tidy: bool, spacing: f64, llm: &crate::llm::LlmOpts) -> Result<Value, String> {
     let (mtype, topic) = store::read_meta(room);
     let existing = existing_stickies(room);
     let frames = frames_info(room);
     let context = store::read_transcript_tail(room, 10); // recent discussion context
-    let (result, provider) = plan_agent(transcript, &existing, &topic, &frames, &context, local_only).await?;
+    let (result, provider) = plan_agent(transcript, &existing, &topic, &frames, &context, local_only, llm).await?;
     match result {
         AgentResult::Command(cmd) => {
             let (label, view) = run_command(room, &existing, &cmd, spacing);
