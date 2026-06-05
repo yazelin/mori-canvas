@@ -268,6 +268,19 @@ export default function App() {
 			yShapes.delete(id)
 			for (const [cid, c] of yConnectors) if (c.from === id || c.to === id) yConnectors.delete(cid)
 		})
+	// delete a whole diagram (frame) + the cards inside it + their connectors
+	const deleteFrame = (fid: string) => {
+		const inside = ([...yShapes.values()] as any[]).filter((s) => s.frameId === fid)
+		const title = frames.find((f) => f.id === fid)?.title || ''
+		if (inside.length && !window.confirm(`刪掉這張圖「${title}」?會一起刪掉裡面的 ${inside.length} 張卡片。`)) return
+		const ids = new Set(inside.map((s) => s.id))
+		const connIds = ([...yConnectors] as any[]).filter(([, c]) => ids.has(c.from) || ids.has(c.to)).map(([cid]) => cid)
+		tx(() => {
+			yFrames.delete(fid)
+			for (const id of ids) yShapes.delete(id)
+			for (const cid of connIds) yConnectors.delete(cid)
+		})
+	}
 	const addConnector = (from: string, to: string) => {
 		const id = `conn-${Math.random().toString(36).slice(2, 10)}`
 		tx(() => yConnectors.set(id, { id, from, to }))
@@ -1043,6 +1056,24 @@ export default function App() {
 								fill={ct.frameTitle}
 								listening={false}
 							/>
+							{/* delete this whole diagram (frame + its cards) */}
+							<Group
+								x={f.x + f.w - 30}
+								y={f.y + 7}
+								onClick={(e: any) => {
+									e.cancelBubble = true
+									deleteFrame(f.id)
+								}}
+								onTap={(e: any) => {
+									e.cancelBubble = true
+									deleteFrame(f.id)
+								}}
+								onMouseEnter={(e: any) => (e.target.getStage().container().style.cursor = 'pointer')}
+								onMouseLeave={(e: any) => (e.target.getStage().container().style.cursor = 'default')}
+							>
+								<Rect width={22} height={20} cornerRadius={7} fill={ct.frameHeader} />
+								<Text width={22} height={20} text="✕" fontSize={13} fontFamily={CANVAS_FONT} fill={ct.frameTitle} align="center" verticalAlign="middle" />
+							</Group>
 							{/* resize handle (bottom-right) — themed corner grip */}
 							<Rect
 								x={f.x + f.w - 20}
