@@ -197,6 +197,17 @@ export default function App() {
 	}
 	const ct = theme === 'dark' ? CANVAS_DARK : CANVAS_LIGHT // canvas (Konva) palette for this theme
 	const [selectedId, setSelectedId] = useState<string | null>(null)
+	// each card's editor number (1-based) — same id-sorted order the agent sees, so you can
+	// say "把 3 號移到…" as a precise fallback when the AI can't infer which card you mean
+	const cardNum = useMemo(() => {
+		const m: Record<string, number> = {}
+		shapes
+			.filter((s: any) => s.type === 'sticky' && !s.note)
+			.slice()
+			.sort((a: any, b: any) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+			.forEach((s: any, i: number) => (m[s.id] = i + 1))
+		return m
+	}, [shapes])
 	const [selectedConnId, setSelectedConnId] = useState<string | null>(null)
 	const [filter, setFilter] = useState<{ type: 'tag' | 'owner'; value: string } | null>(null)
 	const [connectMode, setConnectMode] = useState(false)
@@ -1282,6 +1293,10 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 								/>
 								{/* kind accent dot */}
 								<Circle x={18} y={18} radius={5} fill={KIND_ACCENT[s.color] ?? '#1c1a17'} opacity={0.8} />
+								{/* editor number (fallback handle: "把 N 號…") — not on notes */}
+								{!(s as any).note && cardNum[s.id] && (
+									<Text x={s.w - 30} y={11} width={20} align="right" text={String(cardNum[s.id])} fontSize={12} fontStyle="600" fontFamily={CANVAS_FONT} fill="rgba(28,26,23,0.4)" listening={false} />
+								)}
 								<Text
 									text={s.text}
 									width={s.w}

@@ -240,6 +240,17 @@ pub fn run_command(room: &Room, existing: &[ExistingCard], cmd: &AgentCommand, s
                 ("改寫失敗".into(), None)
             }
         }
+        AgentCommand::Move { index, frame } => {
+            let frames = frames_info(room);
+            if let (Some(c), Some(f)) = (existing.get(*index), frames.get(*frame)) {
+                let fid = f.id.clone();
+                patch(&c.id, &|v| v["frameId"] = json!(fid));
+                tidy_board(room, spacing);
+                (format!("「{}」移到「{}」", c.text, f.title), None)
+            } else {
+                ("移動失敗".into(), None)
+            }
+        }
     }
 }
 
