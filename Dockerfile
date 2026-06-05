@@ -16,6 +16,7 @@ FROM rust:1-bookworm AS server
 WORKDIR /app
 COPY server-rs ./server-rs
 COPY --from=client /app/client/dist ./client/dist
+COPY prompts ./prompts
 RUN cargo build --release --manifest-path server-rs/Cargo.toml
 
 # 3) runtime — ffmpeg for STT silence-trim, ca-certificates for HTTPS to Groq
