@@ -29,6 +29,37 @@ async fn write_tmp(prefix: &str, ext: &str, body: &[u8]) -> String {
     p.to_string_lossy().to_string()
 }
 
+// mori-desktop BodyManifest self-register (like mori-meeting-recorder), OFF by default
+// so we never autonomously write the shared ~/.mori/. Enable with MORI_CANVAS_REGISTER=1.
+fn maybe_register_body_part(port: u16) {
+    if std::env::var("MORI_CANVAS_REGISTER").as_deref() != Ok("1") {
+        return;
+    }
+    let home = std::env::var("HOME").unwrap_or_default();
+    let dir = format!("{}/.mori/body-parts/mori.canvas", home);
+    if std::fs::create_dir_all(&dir).is_err() {
+        return;
+    }
+    let manifest = json!({
+        "schema_version": 1,
+        "id": "mori.canvas",
+        "name": "Mori Canvas",
+        "kind": "local_service",
+        "description": "會議共筆白板 — AI 把語音/逐字稿整理成便利貼+圖,多人即時協作。",
+        "capabilities": ["whiteboard.collaborate", "meeting.visualize", "transcribe.local"],
+        "entrypoints": { "web": format!("http://127.0.0.1:{}/", port) },
+        "interfaces": [
+            { "name": "api", "transport": "http", "base_url": format!("http://127.0.0.1:{}", port) },
+            { "name": "sync", "transport": "ws", "url": format!("ws://127.0.0.1:{}/sync", port) }
+        ],
+        "permissions": [],
+        "data_policy": { "owns_raw_data": true, "default_ingestion": "off" }
+    });
+    if std::fs::write(format!("{}/manifest.json", dir), serde_json::to_string_pretty(&manifest).unwrap()).is_ok() {
+        println!("registered mori-desktop body part: {}/manifest.json", dir);
+    }
+}
+
 #[derive(Clone, serde::Serialize)]
 struct Settings {
     spacing: f64,
@@ -408,6 +439,7 @@ async fn main() {
     let routes = api.or(ws).or(static_files).or(index_fallback).with(cors);
 
     let port: u16 = std::env::var("PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(1334);
+    maybe_register_body_part(port);
     println!("mori-canvas-server (Rust) on http://127.0.0.1:{port}");
     let _ = Arc::clone(&rooms);
     warp::serve(routes).run(([127, 0, 0, 1], port)).await;
