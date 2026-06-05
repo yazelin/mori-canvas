@@ -1648,20 +1648,20 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 				(() => {
 					const s = byId(selectedId)!
 					// keep the popover fully on-screen (esp. mobile): clamp by its own size
-					const left = Math.max(8, Math.min(view.x + s.x * view.scale, size.w - 244))
-					const top = Math.max(8, Math.min(view.y + s.y * view.scale - 48, size.h - 264))
+					const left = Math.max(8, Math.min(view.x + s.x * view.scale, size.w - 268))
+					const top = Math.max(8, Math.min(view.y + s.y * view.scale - 48, size.h - 280))
 					return (
-						<div className="glass float-in" style={{ position: 'fixed', left, top, zIndex: 1500, display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'stretch', padding: '7px 9px', minWidth: 236 }}>
-								<div style={{ display: 'flex', gap: 7, alignItems: 'center' }}>
+						<div className="glass float-in" style={{ position: 'fixed', left, top, zIndex: 1500, display: 'flex', flexDirection: 'column', gap: 7, alignItems: 'stretch', padding: 10, width: 'min(260px, calc(100vw - 16px))', boxSizing: 'border-box' }}>
+								<div style={{ display: 'flex', gap: 9, alignItems: 'center', justifyContent: 'center' }}>
 									{KIND_ORDER.map((c) => (
-										<button key={c} title={KIND_LABEL[c]} onClick={() => patchShape(selectedId, { color: c })} style={{ width: 22, height: 22, padding: 0, borderRadius: '50%', background: COLORS[c], border: s.color === c ? '2px solid var(--ink)' : '2px solid var(--surface)', boxShadow: '0 1px 3px rgba(28,26,23,0.25)' }} />
+										<button key={c} title={KIND_LABEL[c]} onClick={() => patchShape(selectedId, { color: c })} style={{ width: 26, height: 26, padding: 0, borderRadius: '50%', background: COLORS[c], border: s.color === c ? '2px solid var(--ink)' : '2px solid var(--surface)', boxShadow: '0 1px 3px rgba(28,26,23,0.25)' }} />
 									))}
-									<button title="用語音改這張卡的內容/標籤/負責人(再按一次停止)" className={cardRecId === selectedId ? 'live' : undefined} style={{ padding: '4px 9px', marginLeft: 2, ...(cardRecId === selectedId ? { background: 'var(--live)', color: '#fff', borderColor: 'var(--live)' } : {}) }} onClick={() => dictateCard(selectedId)}>{cardRecId === selectedId ? '■' : '● 語音'}</button>
-									<button title="刪除這張 (Delete)" className="btn-danger" style={{ padding: '4px 9px' }} onClick={() => { deleteSticky(selectedId); setSelectedId(null) }}>刪除</button>
 								</div>
-								<div style={{ display: 'flex', gap: 6 }}>
-									<input placeholder="負責人" value={s.owner || ''} onChange={(e) => patchShape(selectedId, { owner: e.target.value.slice(0, 12) })} style={{ flex: 1, fontSize: 12, padding: '4px 7px' }} />
-									<input placeholder="標籤 空格分隔" value={(s.tags || []).join(' ')} onChange={(e) => patchShape(selectedId, { tags: e.target.value.split(/[\s,]+/).filter(Boolean).slice(0, 3) })} style={{ flex: 1.5, fontSize: 12, padding: '4px 7px' }} />
+								<input placeholder="負責人" value={s.owner || ''} onChange={(e) => patchShape(selectedId, { owner: e.target.value.slice(0, 12) })} style={{ width: '100%', fontSize: 12, padding: '7px 9px', boxSizing: 'border-box' }} />
+								<input placeholder="標籤(用空格分隔)" value={(s.tags || []).join(' ')} onChange={(e) => patchShape(selectedId, { tags: e.target.value.split(/[\s,]+/).filter(Boolean).slice(0, 3) })} style={{ width: '100%', fontSize: 12, padding: '7px 9px', boxSizing: 'border-box' }} />
+								<div style={{ display: 'flex', gap: 8 }}>
+									<button title="用語音改這張卡的內容/標籤/負責人(再按一次停止)" className={`btn-soft${cardRecId === selectedId ? ' live' : ''}`} style={{ flex: 1, ...(cardRecId === selectedId ? { background: 'var(--live)', color: '#fff', borderColor: 'var(--live)' } : {}) }} onClick={() => dictateCard(selectedId)}>{cardRecId === selectedId ? '■ 停止' : '● 語音'}</button>
+									<button title="刪除這張 (Delete)" className="btn-danger" style={{ flex: 1 }} onClick={() => { deleteSticky(selectedId); setSelectedId(null) }}>刪除</button>
 								</div>
 							</div>
 					)
