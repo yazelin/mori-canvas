@@ -618,7 +618,8 @@ pub async fn serve(port: u16) {
         .and(warp::body::json())
         .and(with(r_viz))
         .and(warp::header::optional::<String>("x-forwarded-for"))
-        .and_then(move |body: Value, rooms: sync::Rooms, xff: Option<String>| async move {
+        .and(llm_opts())
+        .and_then(move |body: Value, rooms: sync::Rooms, xff: Option<String>, llm: llm::LlmOpts| async move {
             if !rate_ok(&client_ip(&xff)).await {
                 return Ok::<_, warp::Rejection>(warp::reply::json(&json!({ "ok": false, "error": "太頻繁了,休息一下再試" })));
             }
@@ -645,13 +646,13 @@ pub async fn serve(port: u16) {
             let mut turns = 0usize;
             for c in &chunks {
                 // auto_tidy=false:逐塊建板別每塊都重排,最後統一 tidy 一次。
-                if apply::run_agent_turn(&room, c, "AI", s.local_only, false, s.spacing).await.is_ok() {
+                if apply::run_agent_turn(&room, c, "AI", s.local_only, false, s.spacing, &llm).await.is_ok() {
                     turns += 1;
                 }
             }
             apply::tidy_board(&room, s.spacing);
             let markdown = export_markdown(&room);
-            let summary = summary_markdown(&room, &name, s.local_only).await;
+            let summary = summary_markdown(&room, &name, s.local_only, &llm).await;
             let cards = store::read_map(&room, "shapes").iter().filter(|x| x.get("type").and_then(|v| v.as_str()) == Some("sticky")).count();
             let frames = store::frames_sorted(&room).len();
             Ok(warp::reply::json(&json!({
