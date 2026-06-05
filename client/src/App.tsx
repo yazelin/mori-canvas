@@ -358,6 +358,14 @@ export default function App() {
 	const matchesFilter = (s: Sticky) =>
 		!filter ||
 		(filter.type === 'tag' ? (s.tags || []).includes(filter.value) : s.owner === filter.value || s.drawnBy === filter.value)
+	// which frame (diagram) contains a canvas point — topmost wins
+	const frameAt = (cx: number, cy: number) => {
+		for (let i = frames.length - 1; i >= 0; i--) {
+			const f = frames[i]
+			if (cx >= f.x && cx <= f.x + f.w && cy >= f.y && cy <= f.y + f.h) return f
+		}
+		return null
+	}
 
 	function onStickyClick(s: Sticky) {
 		if (connectMode) {
@@ -928,7 +936,13 @@ export default function App() {
 									dragTs.current = now
 									patchShape(s.id, { x: e.target.x(), y: e.target.y() })
 								}}
-								onDragEnd={(e: any) => patchShape(s.id, { x: e.target.x(), y: e.target.y() })}
+								onDragEnd={(e: any) => {
+										const x = e.target.x()
+										const y = e.target.y()
+										// dropping a card inside a frame adds it to that diagram (group membership)
+										const f = frameAt(x + s.w / 2, y + s.h / 2)
+										patchShape(s.id, f ? { x, y, frameId: f.id } : { x, y })
+									}}
 								onClick={() => onStickyClick(s)}
 								onTap={() => onStickyClick(s)}
 								onDblClick={(e: any) => {
