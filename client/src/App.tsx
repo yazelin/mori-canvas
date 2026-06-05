@@ -291,7 +291,60 @@ export default function App() {
 	}
 	// the Konva stage canvas is transparent (the paper grid is CSS, not drawn).
 	// transparent=true exports as-is; otherwise composite onto a paper background.
-	function exportPng(transparent: boolean) {
+	function exportBoard() {
+			const board = {
+				format: 'mori-canvas/v1',
+				exportedAt: new Date().toISOString(),
+				room,
+				meta: { type: yMeta.get('type') || 'meeting', topic: yMeta.get('topic') || '' },
+				frames: Array.from(yFrames.values()),
+				shapes: Array.from(yShapes.values()),
+				connectors: Array.from(yConnectors.values()),
+			}
+			const blob = new Blob([JSON.stringify(board, null, 2)], { type: 'application/json' })
+			const a = document.createElement('a')
+			a.href = URL.createObjectURL(blob)
+			a.download = `mori-canvas-${room}-${new Date().toISOString().slice(0, 10)}.json`
+			a.click()
+			setTimeout(() => URL.revokeObjectURL(a.href), 1000)
+		}
+		async function importBoard(file: File) {
+			let data: any
+			try {
+				data = JSON.parse(await file.text())
+			} catch {
+				setBusy('匯入失敗:檔案不是有效的 JSON')
+				return
+			}
+			if (!data || !Array.isArray(data.shapes)) {
+				setBusy('匯入失敗:不是 mori-canvas 畫板檔')
+				return
+			}
+			if (yShapes.size > 0 && !window.confirm('匯入會覆蓋目前畫板的全部內容,還原成這個檔案。確定?')) return
+			tx(() => {
+				for (const k of [...yShapes.keys()]) yShapes.delete(k)
+				for (const k of [...yConnectors.keys()]) yConnectors.delete(k)
+				for (const k of [...yFrames.keys()]) yFrames.delete(k)
+				for (const f of data.frames || []) if (f?.id) yFrames.set(f.id, f)
+				for (const s of data.shapes || []) if (s?.id) yShapes.set(s.id, s)
+				for (const c of data.connectors || []) if (c?.id) yConnectors.set(c.id, c)
+				if (data.meta?.type) yMeta.set('type', data.meta.type)
+				if (data.meta?.topic != null) yMeta.set('topic', String(data.meta.topic))
+			})
+			setBusy(`已還原畫板:${data.shapes.length} 張卡、${(data.frames || []).length} 張圖`)
+			setExportOpen(false)
+		}
+		function pickAndImportBoard() {
+			const inp = document.createElement('input')
+			inp.type = 'file'
+			inp.accept = 'application/json,.json'
+			inp.onchange = () => {
+				const f = inp.files?.[0]
+				if (f) importBoard(f)
+			}
+			inp.click()
+		}
+		function exportPng(transparent: boolean) {
 		const stage = stageRef.current
 		if (!stage) return
 		const dataUrl = stage.toDataURL({ pixelRatio: 2 })
@@ -1542,7 +1595,16 @@ export default function App() {
 				>
 					<div className="glass modal-in" onClick={(e) => e.stopPropagation()} style={{ background: 'rgba(253,251,247,0.98)', width: 'min(420px, 92vw)', padding: 22, borderRadius: 18 }}>
 						<div style={{ fontWeight: 700, fontSize: 16 }}>匯出 / 輸出</div>
-						<div style={{ fontSize: 12, color: 'var(--ink-soft)', margin: '4px 0 16px' }}>選要輸出什麼。</div>
+						<div style={{ fontSize: 12, color: 'var(--ink-soft)', margin: '4px 0 16px' }}>「畫板存檔」可完整還原;其餘是快照輸出(不能還原)。</div>
+						<div style={{ border: '1px solid var(--line)', borderRadius: 12, padding: '11px 12px', marginBottom: 12, background: 'rgba(124,58,237,0.06)' }}>
+							<div style={{ fontWeight: 600, fontSize: 14 }}>畫板存檔(可還原)</div>
+							<div style={{ fontSize: 12, color: 'var(--ink-soft)', marginBottom: 8 }}>存成 .json,完整保留卡片/連線/圖框,匯入即還原。也可把檔案傳給別人匯入接著討論、再回傳。</div>
+							<div style={{ display: 'flex', gap: 8 }}>
+								<button style={{ flex: 1, background: 'var(--ink)', color: '#fff', borderColor: 'var(--ink)' }}
+									onClick={() => { exportBoard(); setExportOpen(false) }}>下載畫板檔</button>
+								<button style={{ flex: 1 }} onClick={() => pickAndImportBoard()}>匯入還原…</button>
+							</div>
+						</div>
 						<button
 							style={{ display: 'block', width: '100%', textAlign: 'left', marginBottom: 8, padding: '11px 12px' }}
 							onClick={() => {
