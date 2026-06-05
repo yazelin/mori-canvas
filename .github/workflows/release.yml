@@ -1,0 +1,102 @@
+name: release
+
+# 打 `v*` tag → build 兩種「下載即用」掛上 GitHub Release:
+#   1) mori-canvas-server (Linux/Windows) — 自己跑 server、別人連 LAN(多人會議用這個)
+#   2) Mori Canvas 桌面安裝檔 (.msi/.exe/.AppImage/.deb) — 雙擊就開的原生 App
+# 前端用 Node build 成 client/dist 後由 Rust binary 內嵌,所以兩種都要先 npm build:client。
+# 手動 workflow_dispatch = 只驗證 server build(不發 Release;桌面 job 只在 v* tag 跑)。
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write # 建/傳 GitHub Release
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  server:
+    name: server binary (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: linux-x86_64, os: ubuntu-latest, ext: "" }
+          - { name: windows-x86_64, os: windows-latest, ext: ".exe" }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - run: npm ci
+      - run: npm run build:client # 產 client/dist 供 binary 內嵌
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: server-rs }
+      - run: cargo build --release --manifest-path server-rs/Cargo.toml
+      - name: Package
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME:-dev}"
+          dist="mori-canvas-server-${tag}-${{ matrix.name }}"
+          mkdir -p "$dist"
+          cp "server-rs/target/release/mori-canvas-server${{ matrix.ext }}" "$dist/"
+          cat > "$dist/README.txt" <<'TXT'
+          Mori Canvas server — 自己跑、別人用瀏覽器連。
+
+          1) 準備一把 Groq key:設環境變數 GROQ_API_KEY,或同資料夾放一個 .env 檔
+             內容一行: GROQ_API_KEY=你的key   (也可改用設定頁的「用你自己的 AI」)
+          2) 執行 mori-canvas-server(Windows 是 .exe)。
+          3) 瀏覽器開 http://localhost:1334/
+          4) 要讓同網段的人一起開會(手機要錄音需 HTTPS):見 GitHub README「公司區網版」。
+          TXT
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            7z a "${dist}.zip" "$dist" >/dev/null
+            echo "ASSET=${dist}.zip" >> "$GITHUB_ENV"
+          else
+            tar czf "${dist}.tar.gz" "$dist"
+            echo "ASSET=${dist}.tar.gz" >> "$GITHUB_ENV"
+          fi
+      - name: Upload to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.ASSET }}
+          fail_on_unmatched_files: true
+
+  desktop:
+    name: desktop app (${{ matrix.name }})
+    # 桌面安裝檔只在打 tag 時 build(tauri-action 需要真 tag 才好發 Release)
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: linux-x86_64, os: ubuntu-22.04 }
+          - { name: windows-x86_64, os: windows-latest }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - run: npm ci # beforeBuildCommand (npm run build:client) 需要 node_modules
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: src-tauri }
+      - name: Linux tauri deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: Mori Canvas ${{ github.ref_name }}
+          releaseDraft: false
+          prerelease: false
