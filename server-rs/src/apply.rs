@@ -19,7 +19,8 @@ fn column_of(color: &str) -> usize {
 /// existing stickies in a STABLE order (by id) — same order fed to the agent.
 pub fn existing_stickies(room: &Room) -> Vec<ExistingCard> {
     let mut shapes = store::read_map(room, "shapes");
-    shapes.retain(|s| s.get("type").and_then(|v| v.as_str()) == Some("sticky"));
+    // notes (備註) are user annotations — the agent doesn't see or touch them
+    shapes.retain(|s| s.get("type").and_then(|v| v.as_str()) == Some("sticky") && s.get("note").and_then(|v| v.as_bool()) != Some(true));
     shapes.sort_by(|a, b| a.get("id").and_then(|v| v.as_str()).unwrap_or("").cmp(b.get("id").and_then(|v| v.as_str()).unwrap_or("")));
     shapes
         .iter()

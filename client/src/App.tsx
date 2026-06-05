@@ -23,6 +23,7 @@ const COLORS: Record<string, string> = {
 	green: '#a6d6a1', // todo
 	blue: '#9cbce8', // decision
 	red: '#edaaa3', // risk
+	note: '#e3dcf2', // 備註 — annotation, addable to any diagram (lavender, off the 4 kinds)
 }
 // a darker tint of each, for the little "kind" accent dot on a card
 const KIND_ACCENT: Record<string, string> = {
@@ -30,9 +31,10 @@ const KIND_ACCENT: Record<string, string> = {
 	green: '#4e9a5c',
 	blue: '#4a72b8',
 	red: '#c46a61',
+	note: '#7c6bb0',
 }
 const CANVAS_FONT = "'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', system-ui, sans-serif"
-const KIND_LABEL: Record<string, string> = { yellow: '主題', green: '待辦', blue: '決議', red: '風險' }
+const KIND_LABEL: Record<string, string> = { yellow: '主題', green: '待辦', blue: '決議', red: '風險', note: '備註' }
 const KIND_ORDER = ['yellow', 'green', 'blue', 'red'] as const
 // board types (mirror of server/board-types.ts, for the picker + badge)
 const WB_TYPES: { key: string; label: string; blurb: string }[] = [
@@ -222,6 +224,13 @@ export default function App() {
 	const addSticky = (x: number, y: number, text = '', color = 'yellow') => {
 		const id = `sticky-${Math.random().toString(36).slice(2, 10)}`
 		tx(() => yShapes.set(id, { id, x, y, w: 200, h: 200, text, color, drawnBy: 'user' }))
+		return id
+	}
+	// 備註 — a sticky-style annotation (note:true) you can drop on ANY diagram. It's NOT a
+	// diagram node: the server's auto-arrange + AI both ignore note cards, so they stay put.
+	const addNote = (x: number, y: number, text = '') => {
+		const id = `note-${Math.random().toString(36).slice(2, 10)}`
+		tx(() => yShapes.set(id, { id, x, y, w: 200, h: 200, text, color: 'note', note: true, drawnBy: 'user' } as any))
 		return id
 	}
 	const deleteSticky = (id: string) =>
@@ -1305,6 +1314,13 @@ export default function App() {
 				</span>
 				<button title="新增一張空白便利貼(也可雙擊白板空白處)" style={btn} onClick={() => addSticky(140, 140, '', 'yellow') && undefined}>
 					＋ 便利貼
+				</button>
+				<button
+					title="新增一張備註。備註是隨手註記,任何圖表都能貼;自動排列與 AI 都不會動它,放哪就在哪。"
+					style={{ ...btn, background: COLORS.note, borderColor: KIND_ACCENT.note }}
+					onClick={() => addNote(180, 180) && undefined}
+				>
+					＋ 備註
 				</button>
 				<button
 					title="開啟後,依序點兩張便利貼,畫出一條關係箭頭"

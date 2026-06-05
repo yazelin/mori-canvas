@@ -34,6 +34,10 @@ pub fn card_from(v: &Value) -> Option<Card> {
     if v.get("type").and_then(|t| t.as_str()) != Some("sticky") {
         return None;
     }
+    // 備註 are free annotations, not diagram nodes — auto-arrange leaves them where they are
+    if v.get("note").and_then(|n| n.as_bool()) == Some(true) {
+        return None;
+    }
     Some(Card {
         id: v.get("id")?.as_str()?.to_string(),
         color: v.get("color").and_then(|c| c.as_str()).unwrap_or("yellow").to_string(),
