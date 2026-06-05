@@ -327,7 +327,19 @@ async function applyPlan(
 				const { x, y } = slotXY(col, nextRowInColumn(shapes, col))
 				cx = x + CARD_W / 2
 				cy = y + CARD_H / 2
-				shapes.set(id, { id, type: 'sticky', x, y, w: CARD_W, h: CARD_H, text: s.text, color: s.color, drawnBy })
+				shapes.set(id, {
+					id,
+					type: 'sticky',
+					x,
+					y,
+					w: CARD_W,
+					h: CARD_H,
+					text: s.text,
+					color: s.color,
+					drawnBy,
+					...(s.owner ? { owner: s.owner } : {}),
+					...(s.tags && s.tags.length ? { tags: s.tags } : {}),
+				})
 			})
 			newIds.push(id)
 			setMoriCursor(room, { x: cx, y: cy })
@@ -456,6 +468,21 @@ app.post('/api/voice/:room', rateLimit, express.raw({ type: () => true, limit: '
 		res.json({ ok: true, transcript, ...out })
 	} catch (e) {
 		console.error('[voice] error', e)
+		res.status(500).json({ ok: false, error: (e as Error).message })
+	} finally {
+		unlink(tmp).catch(() => {})
+	}
+})
+
+// Transcribe-only: audio -> text (no agent, no board). For dictating a single card.
+app.post('/api/transcribe', rateLimit, express.raw({ type: () => true, limit: '25mb' }), async (req, res) => {
+	const ext = String(req.query.ext ?? 'webm').replace(/[^a-z0-9]/gi, '') || 'webm'
+	const tmp = pathJoin(tmpdir(), `t-${rid('a')}.${ext}`)
+	try {
+		await writeFile(tmp, req.body as Buffer)
+		const text = await transcribe(tmp)
+		res.json({ ok: true, text })
+	} catch (e) {
 		res.status(500).json({ ok: false, error: (e as Error).message })
 	} finally {
 		unlink(tmp).catch(() => {})

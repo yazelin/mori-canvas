@@ -13,6 +13,8 @@ type Sticky = {
 	text: string
 	color: string
 	drawnBy?: string
+	owner?: string
+	tags?: string[]
 }
 type Connector = { id: string; from: string; to: string }
 
@@ -115,6 +117,7 @@ export default function App() {
 	const [view, setView] = useState({ x: 0, y: 0, scale: 1 }) // canvas pan/zoom
 	const [selectedId, setSelectedId] = useState<string | null>(null)
 	const [selectedConnId, setSelectedConnId] = useState<string | null>(null)
+	const [filter, setFilter] = useState<{ type: 'tag' | 'owner'; value: string } | null>(null)
 	const [connectMode, setConnectMode] = useState(false)
 	const [connectFrom, setConnectFrom] = useState<string | null>(null)
 	const [editing, setEditing] = useState<{ id: string; value: string } | null>(null)
@@ -289,6 +292,9 @@ export default function App() {
 	}
 
 	const byId = (id: string) => shapes.find((s) => s.id === id)
+	const matchesFilter = (s: Sticky) =>
+		!filter ||
+		(filter.type === 'tag' ? (s.tags || []).includes(filter.value) : s.owner === filter.value || s.drawnBy === filter.value)
 
 	function onStickyClick(s: Sticky) {
 		if (connectMode) {
@@ -376,6 +382,54 @@ export default function App() {
 	// voice: mic -> /api/voice -> ear -> agent -> board
 	const recRef = useRef<MediaRecorder | null>(null)
 	const [recording, setRecording] = useState(false)
+
+	// dictate a single card's text by voice (from the per-card popover)
+	const [cardRecId, setCardRecId] = useState<string | null>(null)
+	const cardRecRef = useRef<MediaRecorder | null>(null)
+	async function dictateCard(id: string) {
+		if (cardRecId === id) {
+			cardRecRef.current?.stop()
+			return
+		}
+		if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+			setBusy('麥克風被瀏覽器擋:要 localhost 或 HTTPS')
+			return
+		}
+		let stream: MediaStream
+		try {
+			stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+		} catch (e) {
+			setBusy(`麥克風錯誤:${(e as any)?.name || (e as Error).message}`)
+			return
+		}
+		const chunks: BlobPart[] = []
+		const mr = new MediaRecorder(stream)
+		mr.ondataavailable = (ev) => ev.data.size && chunks.push(ev.data)
+		mr.onstop = async () => {
+			stream.getTracks().forEach((t) => t.stop())
+			setCardRecId(null)
+			const type = mr.mimeType || 'audio/webm'
+			const ext = type.includes('mp4') ? 'mp4' : type.includes('ogg') ? 'ogg' : 'webm'
+			setBusy('轉錄中…')
+			try {
+				const r = await fetch(`${SYNC_HTTP}/api/transcribe?ext=${ext}`, {
+					method: 'POST',
+					headers: { 'Content-Type': type },
+					body: new Blob(chunks, { type }),
+				}).then((x) => x.json())
+				if (r.ok && r.text) {
+					patchShape(id, { text: r.text })
+					setBusy('')
+				} else setBusy(r.error ? `錯誤:${r.error}` : '沒聽到內容')
+			} catch (e) {
+				setBusy(`錯誤:${(e as Error).message}`)
+			}
+		}
+		cardRecRef.current = mr
+		mr.start()
+		setCardRecId(id)
+		setBusy('講出這張卡的內容…再按一次停止')
+	}
 
 	// continuous "meeting" mode: keep listening, auto-cut a segment on each pause
 	// (silence) and send it for transcription+agent, so cards appear hands-free.
@@ -687,7 +741,7 @@ export default function App() {
 								x={s.x}
 								y={s.y}
 								draggable
-								onDragStart={() => setSelectedId(s.id)}
+								opacity={matchesFilter(s) ? 1 : 0.16} onDragStart={() => setSelectedId(s.id)}
 								onDragMove={(e: any) => {
 									const now = Date.now()
 									if (now - dragTs.current < 40) return // throttle yjs writes during drag
@@ -731,12 +785,44 @@ export default function App() {
 									align="center"
 									verticalAlign="middle"
 								/>
-								{s.drawnBy && s.drawnBy !== 'user' && (
-									<>
-										<Rect x={14} y={s.h - 26} width={Math.min(s.drawnBy.length * 12 + 16, s.w - 28)} height={18} cornerRadius={9} fill="rgba(28,26,23,0.12)" />
-										<Text x={22} y={s.h - 23} text={s.drawnBy} fontSize={11} fontFamily={CANVAS_FONT} fill="rgba(28,26,23,0.62)" />
-									</>
-								)}
+								{/* content tags (top row) — click to filter by tag */}
+								{(() => {
+									let tx = 32
+									return (s.tags || []).slice(0, 2).map((t, i) => {
+										const w = t.length * 11 + 12
+										const x = tx
+										tx += w + 5
+										return (
+											<Group
+												key={'tag' + i}
+												x={x}
+												y={9}
+												onClick={(e: any) => { e.cancelBubble = true; setFilter({ type: 'tag', value: t }) }}
+												onTap={(e: any) => { e.cancelBubble = true; setFilter({ type: 'tag', value: t }) }}
+											>
+												<Rect width={w} height={17} cornerRadius={8} fill="rgba(28,26,23,0.1)" />
+												<Text x={6} y={3} text={t} fontSize={10.5} fontFamily={CANVAS_FONT} fill="rgba(28,26,23,0.6)" />
+											</Group>
+										)
+									})
+								})()}
+								{/* person: owner(負責人) or drawnBy(誰提的) — click to filter by person */}
+								{(() => {
+									const person = s.owner || (s.drawnBy && s.drawnBy !== 'user' ? s.drawnBy : null)
+									if (!person) return null
+									const w = Math.min(person.length * 12 + 18, s.w - 24)
+									return (
+										<Group
+											x={12}
+											y={s.h - 27}
+											onClick={(e: any) => { e.cancelBubble = true; setFilter({ type: 'owner', value: person }) }}
+											onTap={(e: any) => { e.cancelBubble = true; setFilter({ type: 'owner', value: person }) }}
+										>
+											<Rect width={w} height={19} cornerRadius={9.5} fill={s.owner ? 'rgba(180,83,10,0.18)' : 'rgba(28,26,23,0.1)'} />
+											<Text x={9} y={3.5} text={person} fontSize={11} fontFamily={CANVAS_FONT} fontStyle={s.owner ? '600' : 'normal'} fill={s.owner ? '#8a3f08' : 'rgba(28,26,23,0.6)'} />
+										</Group>
+									)
+								})()}
 							</Group>
 						)
 					})}
@@ -938,6 +1024,19 @@ export default function App() {
 								/>
 							))}
 							<button
+								title="用語音輸入這張卡的內容(再按一次停止)"
+								className={cardRecId === selectedId ? 'live' : undefined}
+								style={{
+									padding: '4px 9px',
+									background: cardRecId === selectedId ? 'var(--live)' : undefined,
+									color: cardRecId === selectedId ? '#fff' : undefined,
+									borderColor: cardRecId === selectedId ? 'var(--live)' : undefined,
+								}}
+								onClick={() => dictateCard(selectedId)}
+							>
+								{cardRecId === selectedId ? '■ 停止' : '● 語音'}
+							</button>
+							<button
 								title="刪除這張 (Delete)"
 								style={{ color: '#b91c1c', padding: '4px 9px' }}
 								onClick={() => {
@@ -950,6 +1049,19 @@ export default function App() {
 						</div>
 					)
 				})()}
+
+			{/* filter bar — only show cards of a tag/person */}
+			{filter && (
+				<div
+					className="glass float-in"
+					style={{ position: 'fixed', bottom: 40, left: '50%', transform: 'translateX(-50%)', zIndex: 1400, display: 'flex', gap: 8, alignItems: 'center', padding: '6px 12px', fontSize: 13 }}
+				>
+					<span>只看 {filter.type === 'tag' ? '#' + filter.value : filter.value}</span>
+					<button style={{ padding: '3px 9px' }} onClick={() => setFilter(null)}>
+						顯示全部 ✕
+					</button>
+				</div>
+			)}
 
 			{/* hint (desktop only) */}
 			{!mobile && (
