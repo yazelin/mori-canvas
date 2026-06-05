@@ -490,8 +490,8 @@ async function runAgentTurn(roomName: string, transcript: string, by: string): P
 			return { provider, intent: 'command', command: done.view ?? null, commandLabel: done.label, added: [], stickies: 0, connectors: 0 }
 		}
 		const r = await applyPlan(roomName, result.plan, by, existing.map((e) => e.id))
-		// tree-type boards (org/flow/architecture): re-flow into the hierarchy once new cards + their connectors land
-		if (boardType(meta.type).layout === 'tree' && (r.ids.length || r.connectorsDrawn)) tidyBoard(room)
+		// non-column boards (org/flow/architecture/mindmap/swot…): re-flow into the right layout once new cards + connectors land
+		if (boardType(meta.type).layout !== 'columns' && (r.ids.length || r.connectorsDrawn)) tidyBoard(room)
 		return { provider, intent: 'content', added: result.plan.stickies, ids: r.ids, stickies: r.ids.length, connectors: r.connectorsDrawn }
 	})
 }
@@ -746,9 +746,115 @@ function treeLayout(room: Room, dir: 'TB' | 'LR') {
 	})
 }
 
+// mind map: center node + concentric rings by depth (following connectors)
+function radialLayout(room: Room) {
+	const shapes = room.doc.getMap('shapes')
+	const conns = room.doc.getMap('connectors')
+	const nodes = [...shapes.values()].filter((s: any) => s.type === 'sticky') as any[]
+	if (!nodes.length) return
+	const ids = nodes.map((n) => n.id)
+	const idset = new Set(ids)
+	const children = new Map<string, string[]>()
+	const indeg = new Map<string, number>()
+	ids.forEach((id) => {
+		children.set(id, [])
+		indeg.set(id, 0)
+	})
+	for (const c of [...conns.values()] as any[]) {
+		if (idset.has(c.from) && idset.has(c.to) && c.from !== c.to) {
+			children.get(c.from)!.push(c.to)
+			indeg.set(c.to, (indeg.get(c.to) || 0) + 1)
+		}
+	}
+	const roots = ids.filter((id) => (indeg.get(id) || 0) === 0)
+	const center = roots[0] || ids[0]
+	const level = new Map<string, number>([[center, 0]])
+	const q: [string, number][] = [[center, 0]]
+	let guard = 0
+	while (q.length && guard++ < 20000) {
+		const [id, lv] = q.shift()!
+		for (const ch of children.get(id) || [])
+			if (!level.has(ch)) {
+				level.set(ch, lv + 1)
+				q.push([ch, lv + 1])
+			}
+	}
+	ids.forEach((id) => {
+		if (!level.has(id)) level.set(id, 1)
+	})
+	// angular allocation: give each subtree an arc proportional to its leaf count,
+	// so children sit in their parent's sector (a real mind-map look)
+	const leaves = new Map<string, number>()
+	const countLeaves = (id: string, seen = new Set<string>()): number => {
+		if (seen.has(id)) return 1
+		seen.add(id)
+		const ch = (children.get(id) || []).filter((k) => (level.get(k) || 0) > (level.get(id) || 0))
+		const c = ch.length ? ch.reduce((s, k) => s + countLeaves(k, seen), 0) : 1
+		leaves.set(id, c)
+		return c
+	}
+	countLeaves(center)
+	const ang = new Map<string, number>()
+	const assign = (id: string, a0: number, a1: number, seen = new Set<string>()) => {
+		if (seen.has(id)) return
+		seen.add(id)
+		ang.set(id, (a0 + a1) / 2)
+		const ch = (children.get(id) || []).filter((k) => (level.get(k) || 0) > (level.get(id) || 0) && !seen.has(k))
+		const total = ch.reduce((s, k) => s + (leaves.get(k) || 1), 0) || 1
+		let a = a0
+		for (const k of ch) {
+			const span = (a1 - a0) * ((leaves.get(k) || 1) / total)
+			assign(k, a, a + span, seen)
+			a += span
+		}
+	}
+	assign(center, -Math.PI / 2, (3 * Math.PI) / 2)
+	const CX = 760
+	const CY = 520
+	const RING = 240
+	room.doc.transact(() => {
+		for (const id of ids) {
+			const lv = level.get(id)!
+			const cur = shapes.get(id) as any
+			if (lv === 0) {
+				shapes.set(id, { ...cur, x: CX - 100, y: CY - 100 })
+				continue
+			}
+			const r = RING * lv
+			const a = ang.get(id) ?? 0
+			shapes.set(id, { ...cur, x: CX - 100 + r * Math.cos(a), y: CY - 100 + r * Math.sin(a) })
+		}
+	})
+}
+
+// SWOT / 2x2 matrix: four quadrants by colour (green=TL, yellow=TR, blue=BL, red=BR)
+function quadrantLayout(room: Room) {
+	const shapes = room.doc.getMap('shapes')
+	const nodes = [...shapes.values()].filter((s: any) => s.type === 'sticky') as any[]
+	const g: Record<string, any[]> = { green: [], yellow: [], blue: [], red: [] }
+	for (const s of nodes) (g[s.color] || g.green).push(s)
+	const CH = 200
+	const GY = 24
+	const topRows = Math.max(g.green.length, g.yellow.length)
+	const topY = 150
+	const botY = topY + topRows * (CH + GY) + 80
+	const leftX = 140
+	const rightX = 420
+	const place = (arr: any[], x: number, y0: number) =>
+		arr.forEach((s, i) => shapes.set(s.id, { ...s, x, y: y0 + i * (CH + GY), w: 200, h: 200 }))
+	room.doc.transact(() => {
+		place(g.green, leftX, topY)
+		place(g.yellow, rightX, topY)
+		place(g.blue, leftX, botY)
+		place(g.red, rightX, botY)
+	})
+}
+
 function tidyBoard(room: Room) {
 	const bt = boardType(boardMeta(room).type)
 	if (bt.layout === 'tree') treeLayout(room, bt.dir)
+	else if (bt.layout === 'radial') radialLayout(room)
+	else if (bt.layout === 'quadrant') quadrantLayout(room)
 	else columnsLayout(room)
 }
 app.post('/api/rooms/:room/tidy', (req, res) => {

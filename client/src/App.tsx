@@ -40,6 +40,10 @@ const WB_TYPES: { key: string; label: string; blurb: string }[] = [
 	{ key: 'orgchart', label: '組織架構圖', blurb: '部門 / 職位 / 隸屬關係,階層樹排列' },
 	{ key: 'flow', label: '流程圖', blurb: '步驟串成先後流程(左→右)' },
 	{ key: 'architecture', label: '系統架構圖', blurb: '元件 / 服務與呼叫依賴' },
+	{ key: 'mindmap', label: '心智圖', blurb: '中心主題向外發散的腦力激盪' },
+	{ key: 'kanban', label: '看板', blurb: '依狀態分欄的任務看板' },
+	{ key: 'swot', label: 'SWOT / 矩陣', blurb: '四象限分析(優勢/劣勢/機會/威脅)' },
+	{ key: 'timeline', label: '時間軸', blurb: '依時間先後排列的事件/里程碑' },
 ]
 const typeLabel = (k: string) => WB_TYPES.find((t) => t.key === k)?.label || '白板'
 // Same-origin: the API and the sync websocket both go through Vite's reverse

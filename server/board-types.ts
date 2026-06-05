@@ -4,7 +4,7 @@
  * right way. The `hint` is injected into the agent prompt; `layout` drives the
  * auto-arrange algorithm; `colors`/`edgeLabel` drive the markdown export.
  */
-export type BoardLayout = 'columns' | 'tree'
+export type BoardLayout = 'columns' | 'tree' | 'radial' | 'quadrant'
 export type BoardType = {
 	key: string
 	label: string
@@ -56,6 +56,46 @@ export const BOARD_TYPES: Record<string, BoardType> = {
 		hint: `這是【系統架構圖】。每張卡=一個元件/服務/資料源;用 color:blue=前端/介面、green=後端/服務、yellow=資料/儲存、red=外部系統。連線代表「呼叫/依賴」,方向 from=呼叫方 to=被呼叫方。tags 放技術或模組。不要用會議概念。`,
 		colors: { blue: '前端/介面', green: '後端/服務', yellow: '資料/儲存', red: '外部系統' },
 		edgeLabel: '依賴(呼叫方 → 被呼叫方)',
+	},
+	mindmap: {
+		key: 'mindmap',
+		label: '心智圖',
+		layout: 'radial',
+		dir: 'TB',
+		blurb: '中心主題向外發散的腦力激盪',
+		hint: `這是【心智圖】。第一張卡(index 0)= 中心主題,放最核心的概念;其餘卡 = 由中心發散的子概念、再發散的孫概念。用 color 表示層級:blue=中心、green=第一層分支、yellow=第二層、red=細節。連線一律 from=上層概念 to=它的下層概念,連成一棵由中心發散的樹(每個子概念都接到它的母概念)。不要用會議的待辦/風險概念。`,
+		colors: { blue: '中心', green: '主幹', yellow: '分支', red: '細節' },
+		edgeLabel: '發散(上層 → 下層)',
+	},
+	kanban: {
+		key: 'kanban',
+		label: '看板',
+		layout: 'columns',
+		dir: 'TB',
+		blurb: '依狀態分欄的任務看板',
+		hint: `這是【任務看板 Kanban】。每張卡=一個任務;用 color 表示狀態:red=待辦、yellow=進行中、green=已完成、blue=阻塞/擱置。owner=負責人(逐字稿有提到就填)。同一個任務隨討論可被移動狀態(用 updates 改 color)。通常不需要連線(任務彼此獨立);除非有明確相依才連 from=先做 to=後做。不要套會議的主題/決議概念。`,
+		colors: { red: '待辦', yellow: '進行中', green: '已完成', blue: '阻塞/擱置' },
+		edgeLabel: '相依(先 → 後)',
+	},
+	swot: {
+		key: 'swot',
+		label: 'SWOT / 矩陣',
+		layout: 'quadrant',
+		dir: 'TB',
+		blurb: '四象限分析(優勢/劣勢/機會/威脅)',
+		hint: `這是【SWOT 四象限分析】。每張卡=一個分析點,放進四個象限,用 color 表示象限:green=優勢(Strengths)、yellow=劣勢(Weaknesses)、blue=機會(Opportunities)、red=威脅(Threats)。每個象限可有多張卡。通常不需要連線。不要套會議的待辦/決議概念。`,
+		colors: { green: '優勢 S', yellow: '劣勢 W', blue: '機會 O', red: '威脅 T' },
+		edgeLabel: '關聯',
+	},
+	timeline: {
+		key: 'timeline',
+		label: '時間軸',
+		layout: 'tree',
+		dir: 'LR',
+		blurb: '依時間先後排列的事件/里程碑',
+		hint: `這是【時間軸】。每張卡=一個事件/里程碑/階段,text 可含時間。用 color:green=已完成、yellow=進行中、blue=規劃中、red=延遲/風險。連線 from=較早 to=較晚,把事件依時間先後串成一條線。不要套會議的主題/決議概念。`,
+		colors: { green: '已完成', yellow: '進行中', blue: '規劃中', red: '延遲/風險' },
+		edgeLabel: '時序(早 → 晚)',
 	},
 }
 
