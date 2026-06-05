@@ -95,7 +95,12 @@ sudo apt install build-essential cmake ffmpeg   # GPU 另加 nvidia-cuda-toolkit
 bash scripts/setup-whisper-linux.sh             # 從源碼編 whisper-server,自動偵測 GPU/CPU
 bash whisper/run-whisper.sh                      # 啟動在 127.0.0.1:8089
 ```
-然後 ⚙ 設定 → 自訂 → 本機 whisper,網址填 `http://127.0.0.1:8089/inference`(留空則自動偵測 `~/.mori/whisper-server.json`)。Windows 可抓 whisper.cpp 官方 release 的 `whisper-server`(GPU 版多半要自編)。`WHISPER_MODEL=large-v3-turbo bash scripts/setup-whisper-linux.sh` 可換大模型(GPU 才跑得動)。
+**Windows 更簡單**(whisper.cpp 有預編譯 release,GPU 的 cuBLAS 版自帶 CUDA runtime、免裝 toolkit):
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\setup-whisper-windows.ps1  # 偵測 GPU 抓對應預編 zip
+powershell -ExecutionPolicy Bypass -File whisper\run-whisper.ps1            # 啟動在 127.0.0.1:8089
+```
+然後 ⚙ 設定 → 自訂 → 本機 whisper,網址填 `http://127.0.0.1:8089/inference`(留空則自動偵測 `~/.mori/whisper-server.json`)。`WHISPER_MODEL=large-v3-turbo` 可換大模型(GPU 才跑得動)。
 
 ---
 
