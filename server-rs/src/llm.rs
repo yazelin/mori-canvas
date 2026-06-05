@@ -55,11 +55,26 @@ fn is_placeholder(k: &str) -> bool {
     k.starts_with("REPLACE") || k.contains("YOUR_GROQ") || k == "TODO"
 }
 
+// a Groq key the user pastes in the settings UI at runtime (for a machine with no env /
+// ~/.mori key and no mori-ear). Session-only; env still wins so a public deploy can't be
+// overridden by a visitor. Powers both the AI (Groq) and cloud STT (Groq Whisper).
+static RUNTIME_GROQ_KEY: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+pub fn set_runtime_groq_key(k: &str) {
+    let k = k.trim();
+    let v = if k.is_empty() || is_placeholder(k) { None } else { Some(k.to_string()) };
+    if let Ok(mut g) = RUNTIME_GROQ_KEY.lock() {
+        *g = v;
+    }
+}
+
 pub fn groq_key() -> Option<String> {
     if let Ok(env) = std::env::var("GROQ_API_KEY") {
         if !env.is_empty() && !is_placeholder(&env) {
             return Some(env);
         }
+    }
+    if let Some(k) = RUNTIME_GROQ_KEY.lock().ok().and_then(|g| g.clone()) {
+        return Some(k);
     }
     let c = mori_config();
     c.get("providers").and_then(|p| p.get("groq")).and_then(|g| g.get("api_key")).and_then(|k| k.as_str()).filter(|k| !is_placeholder(k)).map(|s| s.to_string())
@@ -126,8 +141,22 @@ async fn call_ollama(messages: &[Msg], json_mode: bool) -> Result<String, String
     data.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_str()).map(|s| s.to_string()).ok_or_else(|| "ollama: no content".into())
 }
 
+/// Hard-convert any model output to Taiwan Traditional Chinese. LLMs (gpt-oss / qwen)
+/// follow a "use 繁體 not 簡體" instruction unreliably, so we don't trust them — we
+/// convert deterministically. JSON keys are ASCII so structure is untouched; only the
+/// Chinese values flip to 繁體 (台灣用語). No-op on non-Chinese text.
+pub fn to_traditional(s: &str) -> String {
+    zhconv::zhconv(s, zhconv::Variant::ZhTW)
+}
+
 /// Visitor's own AI (if configured) > Groq > Ollama. local_only => Ollama only.
+/// Output always passes through to_traditional() so cards/summaries are never 簡體.
 pub async fn chat(messages: &[Msg], json_mode: bool, local_only: bool, opts: &LlmOpts) -> Result<(String, String), String> {
+    let (text, provider) = chat_raw(messages, json_mode, local_only, opts).await?;
+    Ok((to_traditional(&text), provider))
+}
+
+async fn chat_raw(messages: &[Msg], json_mode: bool, local_only: bool, opts: &LlmOpts) -> Result<(String, String), String> {
     if let Some((base, key, model)) = opts.custom() {
         return Ok((call_custom(base, key, model, messages, json_mode).await?, format!("byo:{}", model)));
     }
@@ -140,5 +169,19 @@ pub async fn chat(messages: &[Msg], json_mode: bool, local_only: bool, opts: &Ll
             Ok(t) => Ok((t, "ollama".into())),
             Err(oe) => Err(format!("both LLM providers failed — groq: {ge}; ollama: {oe}")),
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn converts_simplified_to_traditional() {
+        // the exact failure the user saw: 开始节点 must become 開始節點
+        assert_eq!(super::to_traditional("开始节点"), "開始節點");
+        // JSON keys (ASCII) stay intact; the Chinese value flips to 繁體
+        let j = super::to_traditional(r#"{"text":"开始决定"}"#);
+        assert!(j.contains("\"text\""), "JSON key kept");
+        assert!(j.contains("開始"), "value converted: {j}");
+        assert!(!j.contains("开"), "no simplified left: {j}");
     }
 }

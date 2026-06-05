@@ -251,6 +251,19 @@ export default function App() {
 	const [sponsor, setSponsor] = useState<{ url?: string; label?: string; notice?: string }>({})
 	const [sponsorHidden, setSponsorHidden] = useState(false)
 	const [caps, setCaps] = useState({ moriEar: true, whisperServer: true, groqKey: true })
+	// a Groq key the user can paste in settings (machine with no env / ~/.mori key) — kept in
+	// this browser and re-sent on load so it survives a server restart. Powers cloud STT + AI.
+	const [groqKeyInput, setGroqKeyInput] = useState(() => localStorage.getItem('wb-groq-key') || '')
+	async function saveGroqKey(key: string) {
+		localStorage.setItem('wb-groq-key', key)
+		const r = await fetch(`${SYNC_HTTP}/api/settings`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ groqApiKey: key }) })
+			.then((x) => x.json())
+			.catch(() => null)
+		if (r?.ok) {
+			setSettings((s) => ({ ...s, groqKey: r.groqKey }))
+			setCaps((c) => ({ ...c, groqKey: r.groqKey, moriEar: r.moriEar ?? c.moriEar, whisperServer: r.whisperServer ?? c.whisperServer }))
+		}
+	}
 	const [cfgInfo, setCfgInfo] = useState({ llmGroqModel: '', llmOllamaModel: '', sttProvider: '', sttGroqModel: '', sttLocalModel: '' })
 	const [subtitle, setSubtitle] = useState('') // transient STT caption (UX feedback)
 	const subtitleTimer = useRef<any>(null)
@@ -654,6 +667,10 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 				setCaps({ moriEar: r.moriEar, whisperServer: r.whisperServer, groqKey: r.groqKey })
 				setCfgInfo({ llmGroqModel: r.llmGroqModel, llmOllamaModel: r.llmOllamaModel, sttProvider: r.sttProvider, sttGroqModel: r.sttGroqModel, sttLocalModel: r.sttLocalModel })
 				setSponsor({ url: r.sponsorUrl || '', label: r.sponsorLabel || '贊助', notice: r.demoNotice || '' })
+				// server's runtime Groq key is lost on restart — if this browser stashed one and
+				// the server now reports none, push it back so cloud STT/AI stay unlocked.
+				const stored = localStorage.getItem('wb-groq-key')
+				if (stored && !r.groqKey) saveGroqKey(stored)
 			})
 			.catch(() => {})
 	}, [])
@@ -1673,6 +1690,11 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 
 									{settings.mode === 'custom' && (
 										<div style={{ border: '1px solid var(--line)', borderRadius: 12, padding: 12, marginBottom: 18 }}>
+											<div style={{ marginBottom: 12 }}>
+												<div style={{ fontWeight: 600, fontSize: 13, marginBottom: 4 }}>Groq API Key {caps.groqKey ? '✓ 已啟用' : '（雲端 Groq STT / AI 需要）'}</div>
+												<div className="muted" style={{ fontSize: 11, marginBottom: 6 }}>沒裝 mori-ear、環境也沒設 key 時，貼上你的 Groq key（console.groq.com/keys）就能用雲端語音與 AI。只存在你瀏覽器，不會顯示給別人。</div>
+												<input type="password" value={groqKeyInput} placeholder="gsk_..." onChange={(e) => setGroqKeyInput(e.target.value)} onBlur={() => saveGroqKey(groqKeyInput.trim())} style={{ width: '100%', fontSize: 12 }} />
+											</div>
 											<div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>語音轉文字(Whisper)</div>
 											<div style={{ display: 'flex', gap: 8, marginBottom: 4 }}>
 												<button disabled={!caps.groqKey} onClick={() => saveSettings({ sttSource: 'cloud' })} style={{ flex: 1, ...(settings.sttSource === 'cloud' ? ON : {}) }}>

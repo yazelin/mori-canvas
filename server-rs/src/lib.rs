@@ -495,7 +495,11 @@ pub async fn serve(port: u16) {
         if let Some(v) = body.get("whisperUrl").and_then(|v| v.as_str()) {
             s.whisper_url = v.chars().take(200).collect();
         }
-        Ok::<_, warp::Rejection>(warp::reply::json(&json!({ "ok": true, "spacing": s.spacing, "autoTidy": s.auto_tidy, "mode": s.mode, "sttSource": s.stt_source, "localOnly": s.local_only, "whisperUrl": s.whisper_url })))
+        // user can paste a Groq key in the UI (no env / ~/.mori needed) -> unlocks cloud STT + AI
+        if let Some(v) = body.get("groqApiKey").and_then(|v| v.as_str()) {
+            llm::set_runtime_groq_key(v);
+        }
+        Ok::<_, warp::Rejection>(warp::reply::json(&json!({ "ok": true, "spacing": s.spacing, "autoTidy": s.auto_tidy, "mode": s.mode, "sttSource": s.stt_source, "localOnly": s.local_only, "whisperUrl": s.whisper_url, "groqKey": llm::groq_key().is_some(), "moriEar": stt::stt_capabilities().get("moriEar").cloned().unwrap_or(json!(false)), "whisperServer": stt::stt_capabilities().get("whisperServer").cloned().unwrap_or(json!(false)) })))
     });
 
     // POST /api/agent/:room — the AI turn (intent classify -> command or content)
