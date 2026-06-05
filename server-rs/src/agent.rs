@@ -1,7 +1,7 @@
 //! Port of agent.ts — meeting transcript -> board plan OR a voice command, with
 //! intent classification, frames, lenient JSON parsing. Uses the Groq->Ollama cascade.
 use crate::board_types::{board_type, types_brief};
-use crate::llm::{chat, Msg};
+use crate::llm::{chat, LlmOpts, Msg};
 use serde_json::Value;
 
 pub fn color_by_kind(kind: &str) -> Option<&'static str> {
@@ -284,7 +284,7 @@ fn parse_result(raw: &str, existing_count: usize) -> AgentResult {
     AgentResult::Content(parse_content_plan(&obj, existing_count))
 }
 
-pub async fn plan_agent(transcript: &str, existing: &[ExistingCard], topic: &str, frames: &[FrameInfo], context: &[String], local_only: bool) -> Result<(AgentResult, String), String> {
+pub async fn plan_agent(transcript: &str, existing: &[ExistingCard], topic: &str, frames: &[FrameInfo], context: &[String], local_only: bool, llm: &LlmOpts) -> Result<(AgentResult, String), String> {
     let topic_block = if topic.is_empty() { String::new() } else { format!("\n會議主題:「{}」", topic) };
     let frames_block = if frames.is_empty() {
         "\n\n目前畫布上沒有任何圖框(content 的第一段請用 \"frame\":{\"new\":{...}} 開一張新圖)。".to_string()
@@ -319,11 +319,11 @@ pub async fn plan_agent(transcript: &str, existing: &[ExistingCard], topic: &str
     };
     let user = format!("使用者這段話(三引號內,可能是會議內容、也可能是給你的指令):\n\"\"\"\n{}\n\"\"\"{}{}{}{}{}", transcript, ctx_block, topic_block, frames_block, ref_block, existing_block);
     let messages = vec![Msg { role: "system", content: SYSTEM.to_string() }, Msg { role: "user", content: user }];
-    let (text, provider) = chat(&messages, true, local_only).await?;
+    let (text, provider) = chat(&messages, true, local_only, llm).await?;
     Ok((parse_result(&text, existing.len()), provider))
 }
 
-pub async fn plan_card_edit(transcript: &str, text: &str, owner: Option<&str>, tags: Option<&[String]>, local_only: bool) -> Result<CardEdit, String> {
+pub async fn plan_card_edit(transcript: &str, text: &str, owner: Option<&str>, tags: Option<&[String]>, local_only: bool, llm: &LlmOpts) -> Result<CardEdit, String> {
     let sys = "使用者用語音口述要修改一張便利貼。只輸出一個 JSON,只包含「要更新的欄位」(沒提到的欄位一律不要出現):\n{ \"text\":\"<新文字,繁中短語≤14字>\", \"tags\":[\"<標籤>\"], \"owner\":\"<負責人姓名>\", \"kind\":\"topic|todo|decision|risk\" }\n判斷:口述描述/重寫內容→text;提到標籤/歸類→tags(整組取代);提到負責人/指派/交給→owner;提到決議/待辦/風險/主題→kind。一句可同時改多欄。沒提到的欄位絕對不要放。只輸出 JSON。";
     let mut meta = vec![format!("文字「{}」", text)];
     if let Some(o) = owner {
@@ -335,7 +335,7 @@ pub async fn plan_card_edit(transcript: &str, text: &str, owner: Option<&str>, t
         }
     }
     let user = format!("這張便利貼目前:{}。\n口述修改(三引號內):\n\"\"\"\n{}\n\"\"\"", meta.join(","), transcript);
-    let (out, _p) = chat(&[Msg { role: "system", content: sys.to_string() }, Msg { role: "user", content: user }], true, local_only).await?;
+    let (out, _p) = chat(&[Msg { role: "system", content: sys.to_string() }, Msg { role: "user", content: user }], true, local_only, llm).await?;
     let mut edit = CardEdit::default();
     if let Some(obj) = extract_json(&out) {
         if let Some(t) = obj.get("text").and_then(|v| v.as_str()).filter(|s| !s.trim().is_empty()) {

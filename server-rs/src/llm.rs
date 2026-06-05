@@ -7,6 +7,45 @@ pub struct Msg {
     pub content: String,
 }
 
+/// optional visitor-supplied "bring your own AI" — any OpenAI-compatible endpoint
+/// (OpenAI / Groq / Azure / Gemini-compat / OpenRouter / Ollama). When base+key+model
+/// are all set, the request uses these instead of the host's Groq, so the visitor pays.
+#[derive(Default, Clone)]
+pub struct LlmOpts {
+    pub base: Option<String>,
+    pub key: Option<String>,
+    pub model: Option<String>,
+}
+impl LlmOpts {
+    fn custom(&self) -> Option<(&str, &str, &str)> {
+        let b = self.base.as_deref().map(str::trim).filter(|s| !s.is_empty())?;
+        let k = self.key.as_deref().map(str::trim).filter(|s| !s.is_empty())?;
+        let m = self.model.as_deref().map(str::trim).filter(|s| !s.is_empty())?;
+        Some((b, k, m))
+    }
+}
+
+async fn call_custom(base: &str, key: &str, model: &str, messages: &[Msg], json_mode: bool) -> Result<String, String> {
+    let url = format!("{}/chat/completions", base.trim_end_matches('/'));
+    let msgs: Vec<Value> = messages.iter().map(|m| json!({"role": m.role, "content": m.content})).collect();
+    let mut body = json!({ "model": model, "messages": msgs });
+    if json_mode {
+        body["response_format"] = json!({ "type": "json_object" });
+    }
+    let res = reqwest::Client::new()
+        .post(&url)
+        .header("Authorization", format!("Bearer {}", key))
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("自訂 AI 連不到 {url}: {e}"))?;
+    if !res.status().is_success() {
+        return Err(format!("自訂 AI {}: {}", res.status(), res.text().await.unwrap_or_default().chars().take(160).collect::<String>()));
+    }
+    let data: Value = res.json().await.map_err(|e| format!("自訂 AI 回應非 JSON: {e}"))?;
+    data.get("choices").and_then(|c| c.get(0)).and_then(|c| c.get("message")).and_then(|m| m.get("content")).and_then(|c| c.as_str()).map(|s| s.to_string()).ok_or_else(|| "自訂 AI 沒有回 content".into())
+}
+
 fn mori_config() -> Value {
     let home = std::env::var("HOME").unwrap_or_default();
     std::fs::read_to_string(format!("{}/.mori/config.json", home)).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or(json!({}))
@@ -87,8 +126,11 @@ async fn call_ollama(messages: &[Msg], json_mode: bool) -> Result<String, String
     data.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_str()).map(|s| s.to_string()).ok_or_else(|| "ollama: no content".into())
 }
 
-/// Groq first; on failure fall back to Ollama. local_only => Ollama only.
-pub async fn chat(messages: &[Msg], json_mode: bool, local_only: bool) -> Result<(String, String), String> {
+/// Visitor's own AI (if configured) > Groq > Ollama. local_only => Ollama only.
+pub async fn chat(messages: &[Msg], json_mode: bool, local_only: bool, opts: &LlmOpts) -> Result<(String, String), String> {
+    if let Some((base, key, model)) = opts.custom() {
+        return Ok((call_custom(base, key, model, messages, json_mode).await?, format!("byo:{}", model)));
+    }
     if local_only {
         return Ok((call_ollama(messages, json_mode).await?, "ollama(local-only)".into()));
     }

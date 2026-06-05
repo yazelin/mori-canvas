@@ -152,6 +152,14 @@ fn with<T: Clone + Send>(t: T) -> impl Filter<Extract = (T,), Error = std::conve
     warp::any().map(move || t.clone())
 }
 
+// visitor's "bring your own AI" override, from request headers (set client-side)
+fn llm_opts() -> impl Filter<Extract = (llm::LlmOpts,), Error = warp::Rejection> + Clone {
+    warp::header::optional::<String>("x-llm-base")
+        .and(warp::header::optional::<String>("x-llm-key"))
+        .and(warp::header::optional::<String>("x-llm-model"))
+        .map(|base: Option<String>, key: Option<String>, model: Option<String>| llm::LlmOpts { base, key, model })
+}
+
 // frame-aware markdown export (port of /api/export)
 fn export_markdown(room: &sync::Room) -> String {
     let shapes = store::read_map(room, "shapes");
@@ -245,7 +253,7 @@ fn strip_think(s: &str) -> String {
 }
 
 // one-page meeting note via the LLM (port of /api/summary)
-async fn summary_markdown(room: &sync::Room, name: &str, local_only: bool) -> String {
+async fn summary_markdown(room: &sync::Room, name: &str, local_only: bool, llm: &llm::LlmOpts) -> String {
     let shapes: Vec<Value> = store::read_map(room, "shapes").into_iter().filter(|s| s.get("type").and_then(|v| v.as_str()) == Some("sticky")).collect();
     let conns = store::read_map(room, "connectors");
     if shapes.is_empty() {
@@ -279,7 +287,7 @@ async fn summary_markdown(room: &sync::Room, name: &str, local_only: bool) -> St
         .collect();
     let board = format!("便利貼(括號內是提出者):\n{}\n\n關聯:\n{}", lines.join("\n"), if rel.is_empty() { "(無)".to_string() } else { rel.join("\n") });
     let sys = "你是會議記錄員。根據提供的白板便利貼(已分類)整理成一頁繁體中文會議紀錄,用這些區塊:## 會議重點 / ## 決議 / ## 待辦事項(若便利貼標了提出者,在待辦後標負責人)/ ## 風險 / ## 下一步。只根據提供內容,不得編造;沒有內容的區塊就省略。直接輸出 markdown,不要前言。";
-    match llm::chat(&[llm::Msg { role: "system", content: sys.into() }, llm::Msg { role: "user", content: board }], false, local_only).await {
+    match llm::chat(&[llm::Msg { role: "system", content: sys.into() }, llm::Msg { role: "user", content: board }], false, local_only, llm).await {
         Ok((t, _)) => format!("# 會議摘要:{}\n\n{}\n", name, strip_think(&t)),
         Err(e) => format!("摘要失敗:{}", e),
     }
@@ -390,10 +398,10 @@ pub async fn serve(port: u16) {
 
     // GET /api/summary/:room — one-page meeting note via the LLM
     let r_summary = rooms.clone();
-    let summary = warp::get().and(warp::path!("api" / "summary" / String)).and(with(r_summary)).and_then(|name: String, rooms: sync::Rooms| async move {
+    let summary = warp::get().and(warp::path!("api" / "summary" / String)).and(with(r_summary)).and(llm_opts()).and_then(|name: String, rooms: sync::Rooms, llm: llm::LlmOpts| async move {
         let room = sync::get_or_create_room(&rooms, &name).await;
         let lo = SETTINGS.lock().await.local_only;
-        let md = summary_markdown(&room, &name, lo).await;
+        let md = summary_markdown(&room, &name, lo, &llm).await;
         Ok::<_, warp::Rejection>(warp::reply::with_header(md, "Content-Type", "text/markdown; charset=utf-8"))
     });
 
@@ -439,7 +447,7 @@ pub async fn serve(port: u16) {
 
     // POST /api/agent/:room — the AI turn (intent classify -> command or content)
     let r_agent = rooms.clone();
-    let agent_ep = warp::post().and(warp::path!("api" / "agent" / String)).and(warp::body::json()).and(with(r_agent)).and(warp::header::optional::<String>("x-forwarded-for")).and_then(|name: String, body: Value, rooms: sync::Rooms, xff: Option<String>| async move {
+    let agent_ep = warp::post().and(warp::path!("api" / "agent" / String)).and(warp::body::json()).and(with(r_agent)).and(warp::header::optional::<String>("x-forwarded-for")).and(llm_opts()).and_then(|name: String, body: Value, rooms: sync::Rooms, xff: Option<String>, llm: llm::LlmOpts| async move {
         if !rate_ok(&client_ip(&xff)).await {
             return Ok::<_, warp::Rejection>(warp::reply::json(&json!({ "ok": false, "error": "太頻繁了,休息一下再試(demo 限流)" })));
         }
@@ -451,7 +459,7 @@ pub async fn serve(port: u16) {
         let room = sync::get_or_create_room(&rooms, &name).await;
         let s = SETTINGS.lock().await.clone();
         let _lk = room_lock(&name).await; let _guard = _lk.lock().await; // serialize agent turns (per-room race guard)
-        let res = apply::run_agent_turn(&room, &transcript, &by, s.local_only, s.auto_tidy, s.spacing).await;
+        let res = apply::run_agent_turn(&room, &transcript, &by, s.local_only, s.auto_tidy, s.spacing, &llm).await;
         Ok(match res {
             Ok(v) => warp::reply::json(&v),
             Err(e) => warp::reply::json(&json!({ "ok": false, "error": e })),
@@ -476,8 +484,8 @@ pub async fn serve(port: u16) {
 
     // POST /api/voice/:room — audio -> STT -> agent turn
     let r_voice = rooms.clone();
-    let voice_ep = warp::post().and(warp::path!("api" / "voice" / String)).and(warp::query::<HashMap<String, String>>()).and(warp::body::bytes()).and(with(r_voice)).and(warp::header::optional::<String>("x-forwarded-for")).and_then(
-        |name: String, q: HashMap<String, String>, body: bytes::Bytes, rooms: sync::Rooms, xff: Option<String>| async move {
+    let voice_ep = warp::post().and(warp::path!("api" / "voice" / String)).and(warp::query::<HashMap<String, String>>()).and(warp::body::bytes()).and(with(r_voice)).and(warp::header::optional::<String>("x-forwarded-for")).and(llm_opts()).and_then(
+        |name: String, q: HashMap<String, String>, body: bytes::Bytes, rooms: sync::Rooms, xff: Option<String>, llm: llm::LlmOpts| async move {
             if !rate_ok(&client_ip(&xff)).await {
                 return Ok::<_, warp::Rejection>(warp::reply::json(&json!({ "ok": false, "error": "太頻繁了,休息一下(demo 限流)" })));
             }
@@ -496,7 +504,7 @@ pub async fn serve(port: u16) {
             let by: String = q.get("by").map(|s| s.as_str()).unwrap_or("voice").chars().take(24).collect();
             let room = sync::get_or_create_room(&rooms, &name).await;
             let _lk = room_lock(&name).await; let _guard = _lk.lock().await;
-            let mut res = match apply::run_agent_turn(&room, &transcript, &by, s.local_only, s.auto_tidy, s.spacing).await {
+            let mut res = match apply::run_agent_turn(&room, &transcript, &by, s.local_only, s.auto_tidy, s.spacing, &llm).await {
                 Ok(v) => v,
                 Err(e) => json!({ "ok": false, "error": e }),
             };
@@ -507,8 +515,8 @@ pub async fn serve(port: u16) {
 
     // POST /api/card/:room/:cardId — dictate one card's text/tags/owner/kind
     let r_card = rooms.clone();
-    let card_ep = warp::post().and(warp::path!("api" / "card" / String / String)).and(warp::query::<HashMap<String, String>>()).and(warp::body::bytes()).and(with(r_card)).and(warp::header::optional::<String>("x-forwarded-for")).and_then(
-        |name: String, card_id: String, q: HashMap<String, String>, body: bytes::Bytes, rooms: sync::Rooms, xff: Option<String>| async move {
+    let card_ep = warp::post().and(warp::path!("api" / "card" / String / String)).and(warp::query::<HashMap<String, String>>()).and(warp::body::bytes()).and(with(r_card)).and(warp::header::optional::<String>("x-forwarded-for")).and(llm_opts()).and_then(
+        |name: String, card_id: String, q: HashMap<String, String>, body: bytes::Bytes, rooms: sync::Rooms, xff: Option<String>, llm: llm::LlmOpts| async move {
             if !rate_ok(&client_ip(&xff)).await {
                 return Ok::<_, warp::Rejection>(warp::reply::json(&json!({ "ok": false, "error": "太頻繁了,休息一下(demo 限流)" })));
             }
@@ -527,7 +535,7 @@ pub async fn serve(port: u16) {
             }
             let (text, owner, tags) = cur.unwrap();
             let _lk = room_lock(&name).await; let _guard = _lk.lock().await;
-            let edit = match agent::plan_card_edit(&transcript, &text, owner.as_deref(), tags.as_deref(), s.local_only).await {
+            let edit = match agent::plan_card_edit(&transcript, &text, owner.as_deref(), tags.as_deref(), s.local_only, &llm).await {
                 Ok(e) => e,
                 Err(e) => return Ok(warp::reply::json(&json!({ "ok": false, "error": e, "transcript": transcript }))),
             };
@@ -567,7 +575,7 @@ pub async fn serve(port: u16) {
         .or(settings_get)
         .or(settings_post);
 
-    let cors = warp::cors().allow_any_origin().allow_methods(vec!["GET", "POST", "OPTIONS"]).allow_headers(vec!["Content-Type"]);
+    let cors = warp::cors().allow_any_origin().allow_methods(vec!["GET", "POST", "OPTIONS"]).allow_headers(vec!["Content-Type", "x-llm-base", "x-llm-key", "x-llm-model"]);
     // serve the embedded client (single self-contained binary: client + sync + api on one port).
     // SPA fallback: unknown paths -> index.html.
     let serve_client = warp::get().and(warp::path::full()).map(|p: warp::path::FullPath| {
