@@ -48,6 +48,28 @@ const WB_TYPES: { key: string; label: string; blurb: string }[] = [
 	{ key: 'gantt', label: '甘特圖 / 排程', blurb: '任務排程,列=負責人,左→右時間' },
 ]
 const typeLabel = (k: string) => WB_TYPES.find((t) => t.key === k)?.label || '白板'
+// hierarchical types use orthogonal "axis" connectors (elbow), routed by direction
+const WB_TREE_DIR: Record<string, 'TB' | 'LR'> = { orgchart: 'TB', architecture: 'TB', flow: 'LR', timeline: 'LR' }
+// elbow polyline from rect a -> rect b. TB routes via a shared horizontal mid-line
+// (siblings share it so lines don't overlap); LR via a vertical mid-line.
+function elbowPoints(a: Sticky, b: Sticky, dir: 'TB' | 'LR'): number[] {
+	const acx = a.x + a.w / 2
+	const bcx = b.x + b.w / 2
+	const acy = a.y + a.h / 2
+	const bcy = b.y + b.h / 2
+	if (dir === 'TB') {
+		const down = bcy >= acy
+		const sy = down ? a.y + a.h : a.y
+		const ey = down ? b.y : b.y + b.h
+		const midY = (sy + ey) / 2
+		return [acx, sy, acx, midY, bcx, midY, bcx, ey]
+	}
+	const right = bcx >= acx
+	const sx = right ? a.x + a.w : a.x
+	const ex = right ? b.x : b.x + b.w
+	const midX = (sx + ex) / 2
+	return [sx, acy, midX, acy, midX, bcy, ex, bcy]
+}
 // Same-origin: the API and the sync websocket both go through Vite's reverse
 // proxy, so this works over http OR https (and behind a tunnel) with no hardcoded
 // port. ws upgrades to wss automatically when the page is served over https.
@@ -929,10 +951,14 @@ export default function App() {
 						// a connector spanning two different diagrams = a cross-reference, drawn dashed
 						const cross = a.frameId && b.frameId && a.frameId !== b.frameId
 						const baseColor = cross ? 'rgba(124,58,160,0.6)' : 'rgba(28,26,23,0.4)'
+						// hierarchical diagrams use orthogonal "axis" elbow lines
+						const frame = a.frameId && a.frameId === b.frameId ? frames.find((f) => f.id === a.frameId) : null
+						const tdir = frame ? WB_TREE_DIR[frame.type] : null
+						const points = tdir && !cross ? elbowPoints(a, b, tdir) : [x1, y1, x2, y2]
 						return (
 							<Arrow
 								key={c.id}
-								points={[x1, y1, x2, y2]}
+								points={points}
 								stroke={sel ? ACCENT : baseColor}
 								fill={sel ? ACCENT : baseColor}
 								strokeWidth={sel ? 3.5 : 2}
