@@ -18,12 +18,16 @@ pub fn read_meta(room: &Room) -> (String, String) {
     let meta = doc.get_or_insert_map("meta");
     let txn = doc.transact();
     let get = |k: &str| -> Option<String> {
-        meta.get(&txn, k).and_then(|o| match any_to_json(&o.to_json(&txn)) {
-            Value::String(s) => Some(s),
-            _ => None,
-        })
+        meta.get(&txn, k)
+            .and_then(|o| match any_to_json(&o.to_json(&txn)) {
+                Value::String(s) => Some(s),
+                _ => None,
+            })
     };
-    (get("type").unwrap_or_else(|| "meeting".into()), get("topic").unwrap_or_default())
+    (
+        get("type").unwrap_or_else(|| "meeting".into()),
+        get("topic").unwrap_or_default(),
+    )
 }
 
 pub fn set_meta(room: &Room, typ: Option<&str>, topic: Option<&str>) {
@@ -39,7 +43,11 @@ pub fn set_meta(room: &Room, typ: Option<&str>, topic: Option<&str>) {
 }
 
 /// apply tidy positions to shapes + sizes to frames in one transaction
-pub fn apply_tidy(room: &Room, positions: &[(String, f64, f64)], frame_sizes: &[(String, f64, f64)]) {
+pub fn apply_tidy(
+    room: &Room,
+    positions: &[(String, f64, f64)],
+    frame_sizes: &[(String, f64, f64)],
+) {
     let doc = room.awareness.doc();
     let shapes = doc.get_or_insert_map("shapes");
     let frames = doc.get_or_insert_map("frames");
@@ -70,7 +78,10 @@ pub fn read_transcript_tail(room: &Room, n: usize) -> Vec<String> {
     let doc = room.awareness.doc();
     let arr = doc.get_or_insert_array("transcript");
     let txn = doc.transact();
-    let all: Vec<Value> = arr.iter(&txn).map(|v| any_to_json(&v.to_json(&txn))).collect();
+    let all: Vec<Value> = arr
+        .iter(&txn)
+        .map(|v| any_to_json(&v.to_json(&txn)))
+        .collect();
     all.iter()
         .rev()
         .take(n)
@@ -81,14 +92,23 @@ pub fn read_transcript_tail(room: &Room, n: usize) -> Vec<String> {
                 return None;
             }
             let by = j.get("by").and_then(|x| x.as_str()).unwrap_or("");
-            Some(if by.is_empty() { text.to_string() } else { format!("{}:{}", by, text) })
+            Some(if by.is_empty() {
+                text.to_string()
+            } else {
+                format!("{}:{}", by, text)
+            })
         })
         .collect()
 }
 
 pub fn frames_sorted(room: &Room) -> Vec<Value> {
     let mut f = read_map(room, "frames");
-    f.sort_by(|a, b| a.get("id").and_then(|x| x.as_str()).unwrap_or("").cmp(b.get("id").and_then(|x| x.as_str()).unwrap_or("")));
+    f.sort_by(|a, b| {
+        a.get("id")
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .cmp(b.get("id").and_then(|x| x.as_str()).unwrap_or(""))
+    });
     f
 }
 
@@ -97,16 +117,25 @@ pub fn create_frame(room: &Room, typ: &str, title: &str) -> Value {
     let list = read_map(room, "frames");
     let (mut x, mut y) = (80.0_f64, 80.0_f64);
     if let Some(right) = list.iter().max_by(|a, b| {
-        let ra = a.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0) + a.get("w").and_then(|v| v.as_f64()).unwrap_or(0.0);
-        let rb = b.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0) + b.get("w").and_then(|v| v.as_f64()).unwrap_or(0.0);
+        let ra = a.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0)
+            + a.get("w").and_then(|v| v.as_f64()).unwrap_or(0.0);
+        let rb = b.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0)
+            + b.get("w").and_then(|v| v.as_f64()).unwrap_or(0.0);
         ra.partial_cmp(&rb).unwrap_or(std::cmp::Ordering::Equal)
     }) {
-        x = right.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0) + right.get("w").and_then(|v| v.as_f64()).unwrap_or(480.0) + 90.0;
+        x = right.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0)
+            + right.get("w").and_then(|v| v.as_f64()).unwrap_or(480.0)
+            + 90.0;
         y = right.get("y").and_then(|v| v.as_f64()).unwrap_or(80.0);
     }
     let id = format!("frame-{}", rid());
-    let label = if title.is_empty() { crate::board_types::board_type(typ).label } else { title };
-    let f = json!({ "id": id, "title": label, "type": typ, "x": x, "y": y, "w": 480.0, "h": 320.0 });
+    let label = if title.is_empty() {
+        crate::board_types::board_type(typ).label
+    } else {
+        title
+    };
+    let f =
+        json!({ "id": id, "title": label, "type": typ, "x": x, "y": y, "w": 480.0, "h": 320.0 });
     let doc = room.awareness.doc();
     let frames = doc.get_or_insert_map("frames");
     let mut txn = doc.transact_mut();
@@ -130,6 +159,9 @@ pub fn rid() -> String {
     // crude unique id (no rand crate): nanos + counter
     use std::sync::atomic::{AtomicU64, Ordering};
     static C: AtomicU64 = AtomicU64::new(0);
-    let n = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+    let n = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
     format!("{:x}{:x}", n, C.fetch_add(1, Ordering::Relaxed))
 }

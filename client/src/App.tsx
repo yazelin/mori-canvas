@@ -380,10 +380,10 @@ export default function App() {
 	function exportMd() {
 		window.open(`${SYNC_HTTP}/api/export/${encodeURIComponent(room)}`, '_blank')
 	}
-	// a self-contained, styled HTML meeting record: AI summary + the word-for-word
+	// a self-contained, styled HTML board record: type-aware AI summary + optional
 	// transcript. Double-click the .html to read it in any browser (no tools needed).
 	async function exportHtml() {
-		setBusy('產生會議紀錄(HTML)…')
+		setBusy('產生白板紀錄(HTML)…')
 		const esc = (s: string) => (s || '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' } as any)[c])
 		const bold = (s: string) => s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
 		const mdToHtml = (md: string) => {
@@ -423,7 +423,7 @@ export default function App() {
 			? transcript.map((e: any) => `<div class="t"><span class="m">${esc((e.t || '').slice(11, 16))} ${esc(e.by || '')}</span>${esc(e.text || '')}</div>`).join('')
 			: '<p class="muted">(這場沒有逐字記錄)</p>'
 		const date = new Date().toLocaleString('zh-TW')
-		const html = `<!doctype html><html lang="zh-TW"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>會議紀錄 · ${esc(room)}</title>
+		const html = `<!doctype html><html lang="zh-TW"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>白板紀錄 · ${esc(room)}</title>
 <style>
 :root{--ink:#1c1a17;--soft:#6b655c;--line:#e7e1d6;--accent:#b4530a;--bg:#faf7f1}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:'Hanken Grotesk','Noto Sans TC','PingFang TC','Microsoft JhengHei',system-ui,sans-serif;line-height:1.6}
@@ -437,7 +437,7 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 .muted{color:var(--soft)}footer{margin-top:40px;color:var(--soft);font-size:12px;text-align:center}
 @media print{body{background:#fff}.wrap{max-width:none}}
 </style></head><body><div class="wrap">
-<header><h1>會議紀錄</h1><div class="sub">房號 ${esc(room)}${boardTopic ? ' · ' + esc(boardTopic) : ''} · ${esc(date)}</div></header>
+<header><h1>白板紀錄</h1><div class="sub">房號 ${esc(room)}${boardTopic ? ' · ' + esc(boardTopic) : ''} · ${esc(date)}</div></header>
 <section>${mdToHtml(summaryMd)}</section>
 <section class="transcript"><h2>逐字記錄</h2>${tHtml}</section>
 <footer>由 Mori Canvas 共筆白板產生</footer>
@@ -445,10 +445,10 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 		const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
 		const a = document.createElement('a')
 		a.href = URL.createObjectURL(blob)
-		a.download = `會議紀錄-${room}-${new Date().toISOString().slice(0, 10)}.html`
+		a.download = `白板紀錄-${room}-${new Date().toISOString().slice(0, 10)}.html`
 		a.click()
 		setTimeout(() => URL.revokeObjectURL(a.href), 1000)
-		setBusy('已下載會議紀錄(HTML)')
+		setBusy('已下載白板紀錄(HTML)')
 	}
 	function joinRoom() {
 		const c = joinCode.trim().toUpperCase()
@@ -1157,7 +1157,7 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 							['顏色 = 類型', '__LEGEND__'],
 								['自己調整', '雙擊空白新增便利貼、雙擊卡片改字、拖拉移動;點一張卡可改色或刪除;「連線」把兩張卡的關係連起來。'],
 								['拉人一起', '右上「分享 / QR」—— 同事掃 QR 或輸入房號就進來,大家即時一起編輯。'],
-								['收尾', '按「匯出 / 輸出」→ 會議摘要,AI 一鍵產出一頁紀錄(決議 / 待辦 / 風險)。'],
+								['收尾', '按「匯出 / 輸出」→ 白板摘要,AI 依目前圖表類型產出一頁紀錄。'],
 							] as [string, string][]
 						).map(([t, d], i) => (
 							<div key={i} style={{ display: 'flex', gap: 12, marginBottom: 14 }}>
@@ -1596,7 +1596,7 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 							{canInstall && (
 								<button className="btn-accent" onClick={(e) => { e.stopPropagation(); doInstall() }}>安裝 App / 加到主畫面</button>
 							)}
-							<button className="btn-soft" onClick={() => setExportOpen(true)}>匯出 / 會議紀錄</button>
+							<button className="btn-soft" onClick={() => setExportOpen(true)}>匯出 / 白板紀錄</button>
 							<button onClick={() => setSettingsOpen(true)}>⚙ 設定</button>
 							<button onClick={() => toggleTheme()}>{theme === 'dark' ? '☀ 亮色主題' : '☾ 暗色主題'}</button>
 							<button onClick={() => setView({ x: 0, y: 0, scale: 1 })}>回正視圖</button>
@@ -1633,7 +1633,7 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 			{/* app / view (top-right) — desktop only; on mobile these live in the ⋯ menu */}
 			{!mobile && (
 				<div className="glass float-in" style={appbar}>
-					<button title="匯出 / 輸出:會議摘要、Markdown、PNG、畫板存檔(可還原)" className="btn-soft" onClick={() => setExportOpen(true)}>匯出</button>
+					<button title="匯出 / 輸出:白板摘要、Markdown、PNG、畫板存檔(可還原)" className="btn-soft" onClick={() => setExportOpen(true)}>匯出</button>
 					<button style={btn} title="設定:AI 雲端/本機、排列間距、自動重排" onClick={() => setSettingsOpen(true)}>⚙</button>
 					<button style={btn} title={theme === 'dark' ? '切換亮色主題' : '切換暗色主題'} onClick={toggleTheme}>{theme === 'dark' ? '☀' : '☾'}</button>
 					<button style={btn} title="視圖回到原點與原始縮放" onClick={() => setView({ x: 0, y: 0, scale: 1 })}>回正</button>
@@ -1871,14 +1871,14 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 								setExportOpen(false)
 							}}
 						>
-							<div style={{ fontWeight: 600, fontSize: 14 }}>會議摘要</div>
-							<div style={{ fontSize: 12, color: 'var(--ink-soft)' }}>AI 把整張板整理成一頁紀錄(另開頁面)</div>
+							<div style={{ fontWeight: 600, fontSize: 14 }}>白板摘要</div>
+							<div style={{ fontSize: 12, color: 'var(--ink-soft)' }}>AI 依各圖表類型整理成一頁紀錄(另開頁面)</div>
 						</button>
 						<button
 							style={{ display: 'block', width: '100%', textAlign: 'left', marginBottom: 8, padding: '11px 12px' }}
 							onClick={() => { exportHtml(); setExportOpen(false) }}
 						>
-							<div style={{ fontWeight: 600, fontSize: 14 }}>會議紀錄 (HTML) · 含逐字稿</div>
+							<div style={{ fontWeight: 600, fontSize: 14 }}>白板紀錄 (HTML) · 含逐字稿</div>
 							<div style={{ fontSize: 12, color: 'var(--ink-soft)' }}>下載 .html —— 摘要 + 逐字稿,雙擊就能在瀏覽器看</div>
 						</button>
 						<button
@@ -1888,7 +1888,7 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 								setExportOpen(false)
 							}}
 						>
-							<div style={{ fontWeight: 600, fontSize: 14 }}>會議紀錄 (Markdown)</div>
+							<div style={{ fontWeight: 600, fontSize: 14 }}>白板紀錄 (Markdown)</div>
 							<div style={{ fontSize: 12, color: 'var(--ink-soft)' }}>下載 .md —— 每張圖一個區段</div>
 						</button>
 						<div style={{ border: '1px solid var(--line)', borderRadius: 12, padding: '11px 12px', marginBottom: 12 }}>

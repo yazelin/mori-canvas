@@ -1,7 +1,10 @@
 //! applyPlan + runCommand + runAgentTurn — orchestration that writes agent output
 //! into a room's yrs doc. Port of the corresponding sync-server.ts logic (batch
 //! apply; the streaming Mori-cursor effect is a later polish).
-use crate::agent::{plan_agent, AgentCommand, AgentResult, BoardPlan, ExistingCard, FrameInfo, FrameTarget, StickyPlan};
+use crate::agent::{
+    plan_agent, AgentCommand, AgentResult, BoardPlan, ExistingCard, FrameInfo, FrameTarget,
+    StickyPlan,
+};
 use crate::board_types::board_type;
 use crate::layout;
 use crate::store::{self, rid};
@@ -13,24 +16,57 @@ use yrs::{Map, Transact};
 
 const COL_ORDER: [&str; 4] = ["yellow", "green", "blue", "red"];
 fn column_of(color: &str) -> usize {
-    COL_ORDER.iter().position(|c| *c == color).unwrap_or(COL_ORDER.len())
+    COL_ORDER
+        .iter()
+        .position(|c| *c == color)
+        .unwrap_or(COL_ORDER.len())
 }
 
 /// existing stickies in a STABLE order (by id) — same order fed to the agent.
 pub fn existing_stickies(room: &Room) -> Vec<ExistingCard> {
     let mut shapes = store::read_map(room, "shapes");
     // notes (備註) are user annotations — the agent doesn't see or touch them
-    shapes.retain(|s| s.get("type").and_then(|v| v.as_str()) == Some("sticky") && s.get("note").and_then(|v| v.as_bool()) != Some(true));
-    shapes.sort_by(|a, b| a.get("id").and_then(|v| v.as_str()).unwrap_or("").cmp(b.get("id").and_then(|v| v.as_str()).unwrap_or("")));
+    shapes.retain(|s| {
+        s.get("type").and_then(|v| v.as_str()) == Some("sticky")
+            && s.get("note").and_then(|v| v.as_bool()) != Some(true)
+    });
+    shapes.sort_by(|a, b| {
+        a.get("id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .cmp(b.get("id").and_then(|v| v.as_str()).unwrap_or(""))
+    });
     shapes
         .iter()
         .map(|s| ExistingCard {
-            id: s.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-            text: s.get("text").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-            color: s.get("color").and_then(|v| v.as_str()).unwrap_or("yellow").to_string(),
-            owner: s.get("owner").and_then(|v| v.as_str()).map(|x| x.to_string()),
-            tags: s.get("tags").and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|t| t.as_str().map(|x| x.to_string())).collect()),
-            frame_id: s.get("frameId").and_then(|v| v.as_str()).map(|x| x.to_string()),
+            id: s
+                .get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+            text: s
+                .get("text")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+            color: s
+                .get("color")
+                .and_then(|v| v.as_str())
+                .unwrap_or("yellow")
+                .to_string(),
+            owner: s
+                .get("owner")
+                .and_then(|v| v.as_str())
+                .map(|x| x.to_string()),
+            tags: s.get("tags").and_then(|v| v.as_array()).map(|a| {
+                a.iter()
+                    .filter_map(|t| t.as_str().map(|x| x.to_string()))
+                    .collect()
+            }),
+            frame_id: s
+                .get("frameId")
+                .and_then(|v| v.as_str())
+                .map(|x| x.to_string()),
         })
         .collect()
 }
@@ -39,9 +75,21 @@ pub fn frames_info(room: &Room) -> Vec<FrameInfo> {
     store::frames_sorted(room)
         .iter()
         .map(|f| FrameInfo {
-            id: f.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-            title: f.get("title").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-            typ: f.get("type").and_then(|v| v.as_str()).unwrap_or("meeting").to_string(),
+            id: f
+                .get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+            title: f
+                .get("title")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+            typ: f
+                .get("type")
+                .and_then(|v| v.as_str())
+                .unwrap_or("meeting")
+                .to_string(),
         })
         .collect()
 }
@@ -55,7 +103,14 @@ pub fn tidy_board(room: &Room, spacing: f64) {
     store::apply_tidy(room, &pos, &fsz);
 }
 
-fn sticky_json(id: &str, s: &StickyPlan, x: f64, y: f64, drawn_by: &str, frame_id: Option<&str>) -> Value {
+fn sticky_json(
+    id: &str,
+    s: &StickyPlan,
+    x: f64,
+    y: f64,
+    drawn_by: &str,
+    frame_id: Option<&str>,
+) -> Value {
     let mut o = json!({ "id": id, "type": "sticky", "x": x, "y": y, "w": 200.0, "h": 200.0, "text": s.text, "color": s.color, "drawnBy": drawn_by });
     if let Some(fid) = frame_id {
         o["frameId"] = json!(fid);
@@ -85,7 +140,13 @@ fn set_mori_cursor(room: &Room, cursor: Option<(f64, f64)>) {
 /// Stream new stickies one-by-one with Mori's live cursor moving to each (the "Mori draws"
 /// effect), like the Node version. Each phase is its own transaction so no txn is held
 /// across an await. Returns (new_ids, connectors_drawn).
-pub async fn apply_plan(room: &Room, plan: &BoardPlan, drawn_by: &str, existing_ids: &[String], frame_id: Option<&str>) -> (Vec<String>, usize) {
+pub async fn apply_plan(
+    room: &Room,
+    plan: &BoardPlan,
+    drawn_by: &str,
+    existing_ids: &[String],
+    frame_id: Option<&str>,
+) -> (Vec<String>, usize) {
     let e = existing_ids.len();
 
     // 1) updates + deletes (one transaction)
@@ -116,7 +177,9 @@ pub async fn apply_plan(room: &Room, plan: &BoardPlan, drawn_by: &str, existing_
                         .iter(&txn)
                         .filter_map(|(k, v)| {
                             let j = any_to_json(&v.to_json(&txn));
-                            if j.get("from").and_then(|x| x.as_str()) == Some(id.as_str()) || j.get("to").and_then(|x| x.as_str()) == Some(id.as_str()) {
+                            if j.get("from").and_then(|x| x.as_str()) == Some(id.as_str())
+                                || j.get("to").and_then(|x| x.as_str()) == Some(id.as_str())
+                            {
                                 Some(k.to_string())
                             } else {
                                 None
@@ -144,7 +207,11 @@ pub async fn apply_plan(room: &Room, plan: &BoardPlan, drawn_by: &str, existing_
             let doc = room.awareness.doc();
             let shapes = doc.get_or_insert_map("shapes");
             let mut txn = doc.transact_mut();
-            shapes.insert(&mut txn, id.clone(), json_to_any(&sticky_json(&id, s, x, y, drawn_by, frame_id)));
+            shapes.insert(
+                &mut txn,
+                id.clone(),
+                json_to_any(&sticky_json(&id, s, x, y, drawn_by, frame_id)),
+            );
         }
         new_ids.push(id);
     }
@@ -166,9 +233,16 @@ pub async fn apply_plan(room: &Room, plan: &BoardPlan, drawn_by: &str, existing_
         };
         for (a, b) in &plan.connectors {
             if let (Some(from), Some(to)) = (resolve(*a), resolve(*b)) {
-                if from != to && shapes.get(&txn, &from).is_some() && shapes.get(&txn, &to).is_some() {
+                if from != to
+                    && shapes.get(&txn, &from).is_some()
+                    && shapes.get(&txn, &to).is_some()
+                {
                     let cid = format!("conn-{}", rid());
-                    connectors.insert(&mut txn, cid.clone(), json_to_any(&json!({ "id": cid, "from": from, "to": to })));
+                    connectors.insert(
+                        &mut txn,
+                        cid.clone(),
+                        json_to_any(&json!({ "id": cid, "from": from, "to": to })),
+                    );
                     drawn += 1;
                 }
             }
@@ -179,7 +253,12 @@ pub async fn apply_plan(room: &Room, plan: &BoardPlan, drawn_by: &str, existing_
 }
 
 /// returns (human label, optional view command for the client)
-pub fn run_command(room: &Room, existing: &[ExistingCard], cmd: &AgentCommand, spacing: f64) -> (String, Option<Value>) {
+pub fn run_command(
+    room: &Room,
+    existing: &[ExistingCard],
+    cmd: &AgentCommand,
+    spacing: f64,
+) -> (String, Option<Value>) {
     let patch = |id: &str, f: &dyn Fn(&mut Value)| {
         let doc = room.awareness.doc();
         let shapes = doc.get_or_insert_map("shapes");
@@ -196,8 +275,15 @@ pub fn run_command(room: &Room, existing: &[ExistingCard], cmd: &AgentCommand, s
             ("自動排列".into(), None)
         }
         AgentCommand::Filter { by, value } => {
-            let label = if by == "tag" { format!("只看 #{}", value) } else { format!("只看 {}", value) };
-            (label, Some(json!({ "action": "filter", "by": by, "value": value })))
+            let label = if by == "tag" {
+                format!("只看 #{}", value)
+            } else {
+                format!("只看 {}", value)
+            };
+            (
+                label,
+                Some(json!({ "action": "filter", "by": by, "value": value })),
+            )
         }
         AgentCommand::ClearFilter => ("顯示全部".into(), Some(json!({ "action": "clearFilter" }))),
         AgentCommand::Assign { index, owner } => {
@@ -255,7 +341,10 @@ pub fn run_command(room: &Room, existing: &[ExistingCard], cmd: &AgentCommand, s
             for t in titles {
                 store::create_frame(room, "meeting", t);
             }
-            (format!("開了 {} 個區:{}", titles.len(), titles.join("、")), None)
+            (
+                format!("開了 {} 個區:{}", titles.len(), titles.join("、")),
+                None,
+            )
         }
         AgentCommand::Connect { from, to } => {
             if let (Some(a), Some(b)) = (existing.get(*from), existing.get(*to)) {
@@ -263,7 +352,11 @@ pub fn run_command(room: &Room, existing: &[ExistingCard], cmd: &AgentCommand, s
                 let doc = room.awareness.doc();
                 let connectors = doc.get_or_insert_map("connectors");
                 let mut txn = doc.transact_mut();
-                connectors.insert(&mut txn, cid.clone(), json_to_any(&json!({ "id": cid, "from": a.id, "to": b.id })));
+                connectors.insert(
+                    &mut txn,
+                    cid.clone(),
+                    json_to_any(&json!({ "id": cid, "from": a.id, "to": b.id })),
+                );
                 drop(txn);
                 (format!("連起來:「{}」→「{}」", a.text, b.text), None)
             } else {
@@ -273,14 +366,29 @@ pub fn run_command(room: &Room, existing: &[ExistingCard], cmd: &AgentCommand, s
     }
 }
 
-pub fn card_current(room: &Room, id: &str) -> Option<(String, Option<String>, Option<Vec<String>>)> {
-    store::read_map(room, "shapes").into_iter().find(|s| s.get("id").and_then(|v| v.as_str()) == Some(id)).map(|s| {
-        (
-            s.get("text").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-            s.get("owner").and_then(|v| v.as_str()).map(|x| x.to_string()),
-            s.get("tags").and_then(|v| v.as_array()).map(|a| a.iter().filter_map(|t| t.as_str().map(|x| x.to_string())).collect()),
-        )
-    })
+pub fn card_current(
+    room: &Room,
+    id: &str,
+) -> Option<(String, Option<String>, Option<Vec<String>>)> {
+    store::read_map(room, "shapes")
+        .into_iter()
+        .find(|s| s.get("id").and_then(|v| v.as_str()) == Some(id))
+        .map(|s| {
+            (
+                s.get("text")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                s.get("owner")
+                    .and_then(|v| v.as_str())
+                    .map(|x| x.to_string()),
+                s.get("tags").and_then(|v| v.as_array()).map(|a| {
+                    a.iter()
+                        .filter_map(|t| t.as_str().map(|x| x.to_string()))
+                        .collect()
+                }),
+            )
+        })
 }
 
 pub fn apply_card_edit(room: &Room, card_id: &str, edit: &crate::agent::CardEdit) -> bool {
@@ -308,16 +416,29 @@ pub fn apply_card_edit(room: &Room, card_id: &str, edit: &crate::agent::CardEdit
     }
 }
 
-pub async fn run_agent_turn(room: &Room, transcript: &str, by: &str, local_only: bool, auto_tidy: bool, spacing: f64, llm: &crate::llm::LlmOpts) -> Result<Value, String> {
+pub async fn run_agent_turn(
+    room: &Room,
+    transcript: &str,
+    by: &str,
+    local_only: bool,
+    auto_tidy: bool,
+    spacing: f64,
+    llm: &crate::llm::LlmOpts,
+) -> Result<Value, String> {
     let (mtype, topic) = store::read_meta(room);
     let existing = existing_stickies(room);
     let frames = frames_info(room);
     let context = store::read_transcript_tail(room, 10); // recent discussion context
-    let (result, provider) = plan_agent(transcript, &existing, &topic, &frames, &context, local_only, llm).await?;
+    let (result, provider) = plan_agent(
+        transcript, &existing, &topic, &frames, &context, local_only, llm,
+    )
+    .await?;
     match result {
         AgentResult::Command(cmd) => {
             let (label, view) = run_command(room, &existing, &cmd, spacing);
-            Ok(json!({ "ok": true, "provider": provider, "intent": "command", "command": view, "commandLabel": label, "added": [], "stickies": 0, "connectors": 0 }))
+            Ok(
+                json!({ "ok": true, "provider": provider, "intent": "command", "command": view, "commandLabel": label, "added": [], "stickies": 0, "connectors": 0 }),
+            )
         }
         AgentResult::Content(plan) => {
             // resolve frame
@@ -325,27 +446,51 @@ pub async fn run_agent_turn(room: &Room, transcript: &str, by: &str, local_only:
             let frame_id: String = match &plan.frame {
                 Some(FrameTarget::New { typ, title }) => {
                     let f = store::create_frame(room, typ, title);
-                    frame_label = format!("開新圖:{}「{}」", board_type(typ).label, f.get("title").and_then(|v| v.as_str()).unwrap_or(""));
-                    f.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string()
+                    frame_label = format!(
+                        "開新圖:{}「{}」",
+                        board_type(typ).label,
+                        f.get("title").and_then(|v| v.as_str()).unwrap_or("")
+                    );
+                    f.get("id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string()
                 }
                 Some(FrameTarget::Index(i)) if *i < frames.len() => frames[*i].id.clone(),
                 _ => {
                     if let Some(f0) = frames.first() {
                         f0.id.clone()
                     } else {
-                        let f = store::create_frame(room, &mtype, if topic.is_empty() { board_type(&mtype).label } else { &topic });
+                        let f = store::create_frame(
+                            room,
+                            &mtype,
+                            if topic.is_empty() {
+                                board_type(&mtype).label
+                            } else {
+                                &topic
+                            },
+                        );
                         frame_label = format!("開新圖:{}", board_type(&mtype).label);
-                        f.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string()
+                        f.get("id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string()
                     }
                 }
             };
             let existing_ids: Vec<String> = existing.iter().map(|c| c.id.clone()).collect();
-            let added: Vec<Value> = plan.stickies.iter().map(|s| json!({ "text": s.text, "color": s.color })).collect();
+            let added: Vec<Value> = plan
+                .stickies
+                .iter()
+                .map(|s| json!({ "text": s.text, "color": s.color }))
+                .collect();
             let (ids, drawn) = apply_plan(room, &plan, by, &existing_ids, Some(&frame_id)).await;
             if auto_tidy && (!ids.is_empty() || drawn > 0) {
                 tidy_board(room, spacing);
             }
-            Ok(json!({ "ok": true, "provider": provider, "intent": "content", "added": added, "ids": ids, "stickies": ids.len(), "connectors": drawn, "frameLabel": frame_label }))
+            Ok(
+                json!({ "ok": true, "provider": provider, "intent": "content", "added": added, "ids": ids, "stickies": ids.len(), "connectors": drawn, "frameLabel": frame_label }),
+            )
         }
     }
 }

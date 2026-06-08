@@ -31,7 +31,11 @@ fn read_raw(name: &str) -> String {
             return s;
         }
     }
-    EMBEDDED.get_file(&file).and_then(|f| f.contents_utf8()).unwrap_or("").to_string()
+    EMBEDDED
+        .get_file(&file)
+        .and_then(|f| f.contents_utf8())
+        .unwrap_or("")
+        .to_string()
 }
 
 fn strip_comments(s: &str) -> String {

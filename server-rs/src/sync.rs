@@ -1,10 +1,10 @@
 //! Multi-room yrs sync (y-websocket protocol, interops with the yjs JS client) +
 //! debounced per-room snapshot persistence to .data/<room>.bin.
+use futures_util::StreamExt;
+use once_cell::sync::{Lazy, OnceCell};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
-use futures_util::StreamExt;
-use once_cell::sync::{Lazy, OnceCell};
 use tokio::sync::{mpsc, Mutex, RwLock};
 use warp::ws::WebSocket;
 use yrs::sync::Awareness;
@@ -29,7 +29,8 @@ fn data_dir() -> PathBuf {
     PathBuf::from(".data")
 }
 fn room_file(name: &str) -> PathBuf {
-    let enc: String = percent_encoding::utf8_percent_encode(name, percent_encoding::NON_ALPHANUMERIC).to_string();
+    let enc: String =
+        percent_encoding::utf8_percent_encode(name, percent_encoding::NON_ALPHANUMERIC).to_string();
     let base = if enc.len() > 120 {
         use std::hash::{Hash, Hasher};
         let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -104,7 +105,11 @@ pub async fn get_or_create_room(rooms: &Rooms, name: &str) -> Arc<Room> {
         .expect("observe_update_v1");
     let awareness: AwarenessRef = Arc::new(Awareness::new(doc));
     let bcast = Arc::new(BroadcastGroup::new(awareness.clone(), 32).await);
-    let room = Arc::new(Room { awareness, bcast, _sub: sub });
+    let room = Arc::new(Room {
+        awareness,
+        bcast,
+        _sub: sub,
+    });
     w.insert(name.to_string(), room.clone());
     room
 }

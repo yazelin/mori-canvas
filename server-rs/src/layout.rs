@@ -40,18 +40,31 @@ pub fn card_from(v: &Value) -> Option<Card> {
     }
     Some(Card {
         id: v.get("id")?.as_str()?.to_string(),
-        color: v.get("color").and_then(|c| c.as_str()).unwrap_or("yellow").to_string(),
+        color: v
+            .get("color")
+            .and_then(|c| c.as_str())
+            .unwrap_or("yellow")
+            .to_string(),
         x: numf(v, "x", 0.0),
         y: numf(v, "y", 0.0),
         w: numf(v, "w", CARD_W),
         h: numf(v, "h", CARD_H),
-        frame_id: v.get("frameId").and_then(|f| f.as_str()).map(|s| s.to_string()),
-        owner: v.get("owner").and_then(|o| o.as_str()).map(|s| s.to_string()),
+        frame_id: v
+            .get("frameId")
+            .and_then(|f| f.as_str())
+            .map(|s| s.to_string()),
+        owner: v
+            .get("owner")
+            .and_then(|o| o.as_str())
+            .map(|s| s.to_string()),
     })
 }
 
 fn column_of(color: &str) -> usize {
-    COL_ORDER.iter().position(|c| *c == color).unwrap_or(COL_ORDER.len())
+    COL_ORDER
+        .iter()
+        .position(|c| *c == color)
+        .unwrap_or(COL_ORDER.len())
 }
 
 pub fn conn_pairs(conns: &[Value]) -> Vec<(String, String)> {
@@ -67,10 +80,18 @@ pub fn conn_pairs(conns: &[Value]) -> Vec<(String, String)> {
 
 type Pos = HashMap<String, (f64, f64)>;
 
-fn build_graph(cards: &[Card], conns: &[(String, String)]) -> (Vec<String>, HashMap<String, Vec<String>>, HashMap<String, usize>) {
+fn build_graph(
+    cards: &[Card],
+    conns: &[(String, String)],
+) -> (
+    Vec<String>,
+    HashMap<String, Vec<String>>,
+    HashMap<String, usize>,
+) {
     let ids: Vec<String> = cards.iter().map(|c| c.id.clone()).collect();
     let idset: HashSet<&String> = ids.iter().collect();
-    let mut children: HashMap<String, Vec<String>> = ids.iter().map(|id| (id.clone(), vec![])).collect();
+    let mut children: HashMap<String, Vec<String>> =
+        ids.iter().map(|id| (id.clone(), vec![])).collect();
     let mut indeg: HashMap<String, usize> = ids.iter().map(|id| (id.clone(), 0)).collect();
     for (f, t) in conns {
         if idset.contains(f) && idset.contains(t) && f != t {
@@ -95,18 +116,33 @@ fn col_positions(cards: &[Card], ox: f64, oy: f64, sp: f64) -> Pos {
         let col = column_of(&c.color);
         let row = *row_by_col.get(&col).unwrap_or(&0);
         row_by_col.insert(col, row + 1);
-        pos.insert(c.id.clone(), (ox + col as f64 * (CARD_W + COL_GAP * sp), oy + row as f64 * (CARD_H + ROW_GAP * sp)));
+        pos.insert(
+            c.id.clone(),
+            (
+                ox + col as f64 * (CARD_W + COL_GAP * sp),
+                oy + row as f64 * (CARD_H + ROW_GAP * sp),
+            ),
+        );
     }
     pos
 }
 
-fn levels_longest(ids: &[String], children: &HashMap<String, Vec<String>>, indeg: &HashMap<String, usize>) -> HashMap<String, i64> {
-    let mut roots: Vec<String> = ids.iter().filter(|id| *indeg.get(*id).unwrap_or(&0) == 0).cloned().collect();
+fn levels_longest(
+    ids: &[String],
+    children: &HashMap<String, Vec<String>>,
+    indeg: &HashMap<String, usize>,
+) -> HashMap<String, i64> {
+    let mut roots: Vec<String> = ids
+        .iter()
+        .filter(|id| *indeg.get(*id).unwrap_or(&0) == 0)
+        .cloned()
+        .collect();
     if roots.is_empty() && !ids.is_empty() {
         roots.push(ids[0].clone());
     }
     let mut level: HashMap<String, i64> = HashMap::new();
-    let mut q: std::collections::VecDeque<(String, i64)> = roots.into_iter().map(|r| (r, 0)).collect();
+    let mut q: std::collections::VecDeque<(String, i64)> =
+        roots.into_iter().map(|r| (r, 0)).collect();
     let mut guard = 0;
     while let Some((id, lv)) = q.pop_front() {
         guard += 1;
@@ -127,7 +163,14 @@ fn levels_longest(ids: &[String], children: &HashMap<String, Vec<String>>, indeg
     level
 }
 
-fn tree_positions(cards: &[Card], conns: &[(String, String)], ox: f64, oy: f64, dir: &str, sp: f64) -> Pos {
+fn tree_positions(
+    cards: &[Card],
+    conns: &[(String, String)],
+    ox: f64,
+    oy: f64,
+    dir: &str,
+    sp: f64,
+) -> Pos {
     let mut pos = Pos::new();
     if cards.is_empty() {
         return pos;
@@ -150,7 +193,10 @@ fn tree_positions(cards: &[Card], conns: &[(String, String)], ox: f64, oy: f64, 
     });
     let mut by_level: HashMap<i64, Vec<String>> = HashMap::new();
     for id in &order {
-        by_level.entry(*level.get(id).unwrap_or(&0)).or_default().push(id.clone());
+        by_level
+            .entry(*level.get(id).unwrap_or(&0))
+            .or_default()
+            .push(id.clone());
     }
     let gx = CARD_W + 50.0 * sp;
     let gy = CARD_H + 40.0 * sp;
@@ -173,7 +219,11 @@ fn radial_positions(cards: &[Card], conns: &[(String, String)], ox: f64, oy: f64
         return pos;
     }
     let (ids, children, indeg) = build_graph(cards, conns);
-    let center = ids.iter().find(|id| *indeg.get(*id).unwrap_or(&0) == 0).cloned().unwrap_or_else(|| ids[0].clone());
+    let center = ids
+        .iter()
+        .find(|id| *indeg.get(*id).unwrap_or(&0) == 0)
+        .cloned()
+        .unwrap_or_else(|| ids[0].clone());
     // BFS depth from center
     let mut level: HashMap<String, i64> = HashMap::new();
     level.insert(center.clone(), 0);
@@ -197,26 +247,65 @@ fn radial_positions(cards: &[Card], conns: &[(String, String)], ox: f64, oy: f64
     }
     // leaf counts for angular allocation
     let mut leaves: HashMap<String, f64> = HashMap::new();
-    fn count_leaves(id: &str, children: &HashMap<String, Vec<String>>, level: &HashMap<String, i64>, leaves: &mut HashMap<String, f64>, seen: &mut HashSet<String>) -> f64 {
+    fn count_leaves(
+        id: &str,
+        children: &HashMap<String, Vec<String>>,
+        level: &HashMap<String, i64>,
+        leaves: &mut HashMap<String, f64>,
+        seen: &mut HashSet<String>,
+    ) -> f64 {
         if seen.contains(id) {
             return 1.0;
         }
         seen.insert(id.to_string());
-        let ch: Vec<String> = children.get(id).cloned().unwrap_or_default().into_iter().filter(|k| level.get(k).unwrap_or(&0) > level.get(id).unwrap_or(&0)).collect();
-        let c = if ch.is_empty() { 1.0 } else { ch.iter().map(|k| count_leaves(k, children, level, leaves, seen)).sum() };
+        let ch: Vec<String> = children
+            .get(id)
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|k| level.get(k).unwrap_or(&0) > level.get(id).unwrap_or(&0))
+            .collect();
+        let c = if ch.is_empty() {
+            1.0
+        } else {
+            ch.iter()
+                .map(|k| count_leaves(k, children, level, leaves, seen))
+                .sum()
+        };
         leaves.insert(id.to_string(), c);
         c
     }
     count_leaves(&center, &children, &level, &mut leaves, &mut HashSet::new());
     let mut ang: HashMap<String, f64> = HashMap::new();
-    fn assign(id: &str, a0: f64, a1: f64, children: &HashMap<String, Vec<String>>, level: &HashMap<String, i64>, leaves: &HashMap<String, f64>, ang: &mut HashMap<String, f64>, seen: &mut HashSet<String>) {
+    fn assign(
+        id: &str,
+        a0: f64,
+        a1: f64,
+        children: &HashMap<String, Vec<String>>,
+        level: &HashMap<String, i64>,
+        leaves: &HashMap<String, f64>,
+        ang: &mut HashMap<String, f64>,
+        seen: &mut HashSet<String>,
+    ) {
         if seen.contains(id) {
             return;
         }
         seen.insert(id.to_string());
         ang.insert(id.to_string(), (a0 + a1) / 2.0);
-        let ch: Vec<String> = children.get(id).cloned().unwrap_or_default().into_iter().filter(|k| level.get(k).unwrap_or(&0) > level.get(id).unwrap_or(&0) && !seen.contains(k)).collect();
-        let total: f64 = ch.iter().map(|k| leaves.get(k).copied().unwrap_or(1.0)).sum::<f64>().max(1.0);
+        let ch: Vec<String> = children
+            .get(id)
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|k| {
+                level.get(k).unwrap_or(&0) > level.get(id).unwrap_or(&0) && !seen.contains(k)
+            })
+            .collect();
+        let total: f64 = ch
+            .iter()
+            .map(|k| leaves.get(k).copied().unwrap_or(1.0))
+            .sum::<f64>()
+            .max(1.0);
         let mut a = a0;
         for k in ch {
             let span = (a1 - a0) * (leaves.get(&k).copied().unwrap_or(1.0) / total);
@@ -224,7 +313,16 @@ fn radial_positions(cards: &[Card], conns: &[(String, String)], ox: f64, oy: f64
             a += span;
         }
     }
-    assign(&center, -std::f64::consts::FRAC_PI_2, 3.0 * std::f64::consts::FRAC_PI_2, &children, &level, &leaves, &mut ang, &mut HashSet::new());
+    assign(
+        &center,
+        -std::f64::consts::FRAC_PI_2,
+        3.0 * std::f64::consts::FRAC_PI_2,
+        &children,
+        &level,
+        &leaves,
+        &mut ang,
+        &mut HashSet::new(),
+    );
     let ring = 200.0 + 40.0 * sp;
     let max_lv = level.values().copied().max().unwrap_or(0).max(0) as f64;
     let cx = ox + ring * max_lv;
@@ -235,7 +333,10 @@ fn radial_positions(cards: &[Card], conns: &[(String, String)], ox: f64, oy: f64
             pos.insert(id.clone(), (cx, cy));
         } else {
             let a = *ang.get(id).unwrap_or(&0.0);
-            pos.insert(id.clone(), (cx + ring * lv * a.cos(), cy + ring * lv * a.sin()));
+            pos.insert(
+                id.clone(),
+                (cx + ring * lv * a.cos(), cy + ring * lv * a.sin()),
+            );
         }
     }
     pos
@@ -271,14 +372,25 @@ fn quadrant_positions(cards: &[Card], ox: f64, oy: f64, sp: f64) -> Pos {
     pos
 }
 
-fn fishbone_positions(cards: &[Card], conns: &[(String, String)], ox: f64, oy: f64, sp: f64) -> Pos {
+fn fishbone_positions(
+    cards: &[Card],
+    conns: &[(String, String)],
+    ox: f64,
+    oy: f64,
+    sp: f64,
+) -> Pos {
     let mut pos = Pos::new();
     if cards.is_empty() {
         return pos;
     }
     let (ids, children, _indeg) = build_graph(cards, conns);
-    let head = ids.iter().find(|id| children.get(*id).map(|c| c.is_empty()).unwrap_or(true)).cloned().unwrap_or_else(|| ids[0].clone());
-    let mut parents: HashMap<String, Vec<String>> = ids.iter().map(|id| (id.clone(), vec![])).collect();
+    let head = ids
+        .iter()
+        .find(|id| children.get(*id).map(|c| c.is_empty()).unwrap_or(true))
+        .cloned()
+        .unwrap_or_else(|| ids[0].clone());
+    let mut parents: HashMap<String, Vec<String>> =
+        ids.iter().map(|id| (id.clone(), vec![])).collect();
     for f in &ids {
         for t in children.get(f).cloned().unwrap_or_default() {
             parents.get_mut(&t).unwrap().push(f.clone());
@@ -306,7 +418,10 @@ fn fishbone_positions(cards: &[Card], conns: &[(String, String)], ox: f64, oy: f
     }
     let mut by_level: HashMap<i64, Vec<String>> = HashMap::new();
     for id in &ids {
-        by_level.entry(*level.get(id).unwrap_or(&0)).or_default().push(id.clone());
+        by_level
+            .entry(*level.get(id).unwrap_or(&0))
+            .or_default()
+            .push(id.clone());
     }
     let max_lv = level.values().copied().max().unwrap_or(0) as f64;
     let gx = 250.0 * sp;
@@ -326,7 +441,10 @@ fn fishbone_positions(cards: &[Card], conns: &[(String, String)], ox: f64, oy: f
         for (i, id) in list.iter().enumerate() {
             let above = i % 2 == 0;
             let y_off = ((i / 2) as f64 + 1.0) * gy * if above { -1.0 } else { 1.0 };
-            pos.insert(id.clone(), (ox + (max_lv - *lv as f64) * gx, spine_y + y_off));
+            pos.insert(
+                id.clone(),
+                (ox + (max_lv - *lv as f64) * gx, spine_y + y_off),
+            );
         }
     }
     pos
@@ -339,9 +457,19 @@ fn gantt_positions(cards: &[Card], conns: &[(String, String)], ox: f64, oy: f64,
     }
     let by_id: HashMap<&String, &Card> = cards.iter().map(|c| (&c.id, c)).collect();
     let (ids, children, indeg) = build_graph(cards, conns);
-    let mut indeg_c: HashMap<String, i64> = indeg.iter().map(|(k, v)| (k.clone(), *v as i64)).collect();
-    let mut queue: Vec<String> = ids.iter().filter(|id| *indeg_c.get(*id).unwrap_or(&0) == 0).cloned().collect();
-    queue.sort_by(|a, b| by_id[a].x.partial_cmp(&by_id[b].x).unwrap_or(std::cmp::Ordering::Equal));
+    let mut indeg_c: HashMap<String, i64> =
+        indeg.iter().map(|(k, v)| (k.clone(), *v as i64)).collect();
+    let mut queue: Vec<String> = ids
+        .iter()
+        .filter(|id| *indeg_c.get(*id).unwrap_or(&0) == 0)
+        .cloned()
+        .collect();
+    queue.sort_by(|a, b| {
+        by_id[a]
+            .x
+            .partial_cmp(&by_id[b].x)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     let mut order: Vec<String> = vec![];
     let mut seen: HashSet<String> = HashSet::new();
     let mut guard = 0;
@@ -371,20 +499,39 @@ fn gantt_positions(cards: &[Card], conns: &[(String, String)], ox: f64, oy: f64,
     }
     let mut row_of: HashMap<String, usize> = HashMap::new();
     for id in &order {
-        let o = by_id[id].owner.clone().unwrap_or_else(|| "未指派".to_string());
+        let o = by_id[id]
+            .owner
+            .clone()
+            .unwrap_or_else(|| "未指派".to_string());
         let next = row_of.len();
         row_of.entry(o).or_insert(next);
     }
     let gx = CARD_W + 40.0 * sp;
     let gy = CARD_H + 30.0 * sp;
     for (col, id) in order.iter().enumerate() {
-        let o = by_id[id].owner.clone().unwrap_or_else(|| "未指派".to_string());
-        pos.insert(id.clone(), (ox + col as f64 * gx, oy + *row_of.get(&o).unwrap_or(&0) as f64 * gy));
+        let o = by_id[id]
+            .owner
+            .clone()
+            .unwrap_or_else(|| "未指派".to_string());
+        pos.insert(
+            id.clone(),
+            (
+                ox + col as f64 * gx,
+                oy + *row_of.get(&o).unwrap_or(&0) as f64 * gy,
+            ),
+        );
     }
     pos
 }
 
-fn layout_positions(type_key: &str, cards: &[Card], conns: &[(String, String)], ox: f64, oy: f64, sp: f64) -> Pos {
+fn layout_positions(
+    type_key: &str,
+    cards: &[Card],
+    conns: &[(String, String)],
+    ox: f64,
+    oy: f64,
+    sp: f64,
+) -> Pos {
     let bt = board_type(type_key);
     match bt.layout {
         "tree" => tree_positions(cards, conns, ox, oy, bt.dir, sp),
@@ -405,14 +552,24 @@ pub struct Frame {
 pub fn frame_from(v: &Value) -> Option<Frame> {
     Some(Frame {
         id: v.get("id")?.as_str()?.to_string(),
-        typ: v.get("type").and_then(|t| t.as_str()).unwrap_or("meeting").to_string(),
+        typ: v
+            .get("type")
+            .and_then(|t| t.as_str())
+            .unwrap_or("meeting")
+            .to_string(),
         x: numf(v, "x", 80.0),
         y: numf(v, "y", 80.0),
     })
 }
 
 /// Returns (card positions, frame sizes). Frameless boards => one whole-board layout.
-pub fn tidy(meta_type: &str, shapes: &[Value], conns_v: &[Value], frames_v: &[Value], sp: f64) -> (Vec<(String, f64, f64)>, Vec<(String, f64, f64)>) {
+pub fn tidy(
+    meta_type: &str,
+    shapes: &[Value],
+    conns_v: &[Value],
+    frames_v: &[Value],
+    sp: f64,
+) -> (Vec<(String, f64, f64)>, Vec<(String, f64, f64)>) {
     let cards: Vec<Card> = shapes.iter().filter_map(card_from).collect();
     let conns = conn_pairs(conns_v);
     let frames: Vec<Frame> = frames_v.iter().filter_map(frame_from).collect();
@@ -426,11 +583,22 @@ pub fn tidy(meta_type: &str, shapes: &[Value], conns_v: &[Value], frames_v: &[Va
         return (out_pos, out_frames);
     }
     for f in &frames {
-        let fcards: Vec<Card> = cards.iter().filter(|c| c.frame_id.as_deref() == Some(f.id.as_str())).cloned().collect();
+        let fcards: Vec<Card> = cards
+            .iter()
+            .filter(|c| c.frame_id.as_deref() == Some(f.id.as_str()))
+            .cloned()
+            .collect();
         if fcards.is_empty() {
             continue;
         }
-        let pos = layout_positions(&f.typ, &fcards, &conns, f.x + FRAME_PAD, f.y + FRAME_HEAD, sp);
+        let pos = layout_positions(
+            &f.typ,
+            &fcards,
+            &conns,
+            f.x + FRAME_PAD,
+            f.y + FRAME_HEAD,
+            sp,
+        );
         let mut max_x = f.x;
         let mut max_y = f.y;
         for c in &fcards {

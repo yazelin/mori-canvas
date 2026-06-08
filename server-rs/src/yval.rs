@@ -10,9 +10,14 @@ pub fn json_to_any(v: &serde_json::Value) -> Any {
         serde_json::Value::Bool(b) => Any::Bool(*b),
         serde_json::Value::Number(n) => Any::Number(n.as_f64().unwrap_or(0.0)),
         serde_json::Value::String(s) => Any::String(Arc::from(s.as_str())),
-        serde_json::Value::Array(a) => Any::Array(Arc::from(a.iter().map(json_to_any).collect::<Vec<_>>())),
+        serde_json::Value::Array(a) => {
+            Any::Array(Arc::from(a.iter().map(json_to_any).collect::<Vec<_>>()))
+        }
         serde_json::Value::Object(o) => {
-            let m: HashMap<String, Any> = o.iter().map(|(k, val)| (k.clone(), json_to_any(val))).collect();
+            let m: HashMap<String, Any> = o
+                .iter()
+                .map(|(k, val)| (k.clone(), json_to_any(val)))
+                .collect();
             Any::Map(Arc::new(m))
         }
     }
@@ -23,7 +28,9 @@ pub fn any_to_json(a: &Any) -> serde_json::Value {
     match a {
         Any::Null | Any::Undefined => J::Null,
         Any::Bool(b) => J::Bool(*b),
-        Any::Number(n) => serde_json::Number::from_f64(*n).map(J::Number).unwrap_or(J::Null),
+        Any::Number(n) => serde_json::Number::from_f64(*n)
+            .map(J::Number)
+            .unwrap_or(J::Null),
         Any::BigInt(i) => J::Number((*i).into()),
         Any::String(s) => J::String(s.to_string()),
         Any::Buffer(_) => J::Null,
@@ -42,5 +49,7 @@ pub fn any_to_json(a: &Any) -> serde_json::Value {
 pub fn map_values_json(txn: &impl yrs::ReadTxn, map: &yrs::MapRef) -> Vec<serde_json::Value> {
     use yrs::types::ToJson;
     use yrs::Map;
-    map.iter(txn).map(|(_k, v)| any_to_json(&v.to_json(txn))).collect()
+    map.iter(txn)
+        .map(|(_k, v)| any_to_json(&v.to_json(txn)))
+        .collect()
 }

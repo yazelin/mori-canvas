@@ -93,7 +93,15 @@ pub static BOARD_TYPES: Lazy<Vec<BoardType>> = Lazy::new(|| {
 });
 
 pub fn board_type(key: &str) -> &'static BoardType {
-    BOARD_TYPES.iter().find(|t| t.key == key).unwrap_or_else(|| BOARD_TYPES.iter().find(|t| t.key == DEFAULT_BOARD_TYPE).unwrap())
+    BOARD_TYPES
+        .iter()
+        .find(|t| t.key == key)
+        .unwrap_or_else(|| {
+            BOARD_TYPES
+                .iter()
+                .find(|t| t.key == DEFAULT_BOARD_TYPE)
+                .unwrap()
+        })
 }
 
 pub fn color_label(bt: &BoardType, color: &str) -> Option<&'static str> {
@@ -105,8 +113,16 @@ pub fn types_brief() -> String {
     BOARD_TYPES
         .iter()
         .map(|t| {
-            let cols = t.colors.iter().map(|(c, l)| format!("{}={}", c, l)).collect::<Vec<_>>().join("、");
-            format!("- {}({}):配色 {};連線={}", t.key, t.label, cols, t.edge_label)
+            let cols = t
+                .colors
+                .iter()
+                .map(|(c, l)| format!("{}={}", c, l))
+                .collect::<Vec<_>>()
+                .join("、");
+            format!(
+                "- {}({}):配色 {};連線={}",
+                t.key, t.label, cols, t.edge_label
+            )
         })
         .collect::<Vec<_>>()
         .join("\n")
