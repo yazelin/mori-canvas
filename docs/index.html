@@ -4,7 +4,7 @@
 		<meta charset="UTF-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
 		<title>Mori Canvas 共筆白板 — 使用手冊</title>
-		<meta name="description" content="Mori Canvas 共筆白板的完整使用手冊:講話 → AI 自動整理成便利貼+關係圖的多人即時會議白板。試玩、語音指令、命名區、匯出、自架部署一次看懂。" />
+		<meta name="description" content="Mori Canvas 共筆白板的完整使用手冊:講話 → AI 自動整理成便利貼+關係圖的多人即時會議白板。試玩、影片示範、語音指令、命名區、匯出、自架部署一次看懂。" />
 		<meta name="theme-color" content="#faf7f1" />
 		<meta property="og:title" content="Mori Canvas 共筆白板 — 使用手冊" />
 		<meta property="og:description" content="講話 → AI 自動整理成便利貼+圖的多人即時會議白板。完整教學。" />
@@ -84,6 +84,13 @@
 			.card { background: var(--surface); border: 1px solid var(--line); border-radius: 13px; padding: 14px 16px; }
 			.card h4 { margin: 0 0 4px; font-size: 15.5px; }
 			.card p { margin: 0; font-size: 13.5px; color: var(--soft); line-height: 1.6; }
+			.video-stack { display: grid; gap: 16px; margin: 18px 0 4px; }
+			.video-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+			.demo-video { margin: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 13px; overflow: hidden; box-shadow: 0 14px 30px -24px rgba(28,26,23,0.45); }
+			.demo-video video { display: block; width: 100%; aspect-ratio: 1674 / 1268; background: #1c1a17; object-fit: contain; }
+			.demo-video figcaption { padding: 12px 14px 14px; }
+			.demo-video h3 { margin: 0 0 3px; font-size: 17px; }
+			.demo-video p { margin: 0; color: var(--soft); font-size: 13.5px; line-height: 1.6; }
 			.kinds { display: flex; gap: 14px; flex-wrap: wrap; margin: 12px 0; }
 			.kind { display: inline-flex; align-items: center; gap: 7px; font-size: 14px; }
 			.dot { width: 16px; height: 16px; border-radius: 5px; display: inline-block; }
@@ -93,7 +100,12 @@
 			.toc a:hover { color: var(--accent); }
 
 			footer { text-align: center; color: var(--soft); font-size: 13.5px; padding: 36px 0 50px; }
-			@media (max-width: 640px) { .cards, .toc { grid-template-columns: 1fr; columns: 1; } .hero h1 { font-size: 30px; } }
+			@media (max-width: 640px) {
+				.wrap { padding: 0 16px; }
+				.cards, .video-grid, .toc { grid-template-columns: 1fr; columns: 1; }
+				.hero h1 { font-size: 30px; }
+				.demo-video figcaption { padding: 10px 12px 12px; }
+			}
 		</style>
 	</head>
 	<body>
@@ -119,6 +131,7 @@
 			<div class="toc">
 				<a href="#what">這是什麼</a>
 				<a href="#start">30 秒上手</a>
+				<a href="#videos">影片介紹</a>
 				<a href="#record">一、開會記錄(語音)</a>
 				<a href="#commands">二、語音指令大全</a>
 				<a href="#refer">三、AI 認得你指的卡</a>
@@ -126,7 +139,7 @@
 				<a href="#multi">五、多人協作 / 分享</a>
 				<a href="#manual">六、手動操作卡片</a>
 				<a href="#types">七、板型(10 種)</a>
-				<a href="#export">八、匯出與會議紀錄</a>
+				<a href="#export">八、匯出與白板紀錄</a>
 				<a href="#settings">九、設定(語音 / AI)</a>
 				<a href="#install">十、加到主畫面(PWA)</a>
 				<a href="#deploy">十一、三種用法 / 自架</a>
@@ -158,6 +171,38 @@
 					<li>講一段、停頓一下,AI 就把那段重點整理成便利貼上板。整場 hands-free。不想講話?也可把現成逐字稿貼進面板按「丟給 agent」。</li>
 				</ol>
 				<p>要拉人一起:工具列「分享 / QR」→ 同事掃 QR 或輸入房號就進來,大家即時同步。</p>
+			</div>
+		</section>
+
+		<section id="videos">
+			<div class="wrap">
+				<h2><span class="num">＃</span>影片介紹</h2>
+				<p>先看實際流程:貼上逐字稿讓 AI 長出白板,再把成果匯出成可閱讀、可分享的檔案。</p>
+				<div class="video-stack">
+					<figure class="demo-video">
+						<video controls preload="metadata" playsinline src="videos/transcript-to-board.mp4"></video>
+						<figcaption>
+							<h3>逐字稿生圖</h3>
+							<p>把現成逐字稿丟給 agent,AI 自動整理成卡片、連線與圖框。</p>
+						</figcaption>
+					</figure>
+					<div class="video-grid">
+						<figure class="demo-video">
+							<video controls preload="metadata" playsinline src="videos/export-html.mp4"></video>
+							<figcaption>
+								<h3>匯出白板紀錄 HTML</h3>
+								<p>把圖表摘要與全程逐字稿打包成一個可離線閱讀的 HTML 檔。</p>
+							</figcaption>
+						</figure>
+						<figure class="demo-video">
+							<video controls preload="metadata" playsinline src="videos/export-png.mp4"></video>
+							<figcaption>
+								<h3>匯出整張白板 PNG</h3>
+								<p>把目前白板輸出成圖片,適合貼到簡報、文件或聊天室。</p>
+							</figcaption>
+						</figure>
+					</div>
+				</div>
 			</div>
 		</section>
 
@@ -257,12 +302,12 @@
 
 		<section id="export">
 			<div class="wrap">
-				<h2><span class="num">八</span>匯出與會議紀錄</h2>
+				<h2><span class="num">八</span>匯出與白板紀錄</h2>
 				<p>工具列「匯出」:</p>
 				<table>
-					<tr><td>會議紀錄 (HTML)</td><td>一個檔 = AI 摘要(重點/決議/待辦+負責人/風險/下一步)<b>+ 全程逐字稿</b>,雙擊就能在瀏覽器看。最推這個。</td></tr>
-					<tr><td>會議摘要</td><td>AI 把整張板整理成一頁紀錄(另開頁面)</td></tr>
-					<tr><td>Markdown</td><td>純文字會議紀錄</td></tr>
+					<tr><td>白板紀錄 (HTML)</td><td>一個檔 = 依圖表類型產生的 AI 摘要<b>+ 全程逐字稿</b>,雙擊就能在瀏覽器看。最推這個。</td></tr>
+					<tr><td>白板摘要</td><td>AI 依各圖表類型把整張板整理成一頁紀錄(另開頁面)</td></tr>
+					<tr><td>Markdown</td><td>純文字白板紀錄,每張圖一個區段</td></tr>
 					<tr><td>PNG</td><td>整張白板的圖</td></tr>
 					<tr><td>下載畫板檔 (.json)</td><td><b>完整存檔</b> —— 含卡片、連線、圖框、逐字稿,可「匯入還原」回完整白板,也能傳給別人接著編。</td></tr>
 				</table>
