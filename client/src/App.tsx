@@ -62,6 +62,43 @@ const CANVAS_DARK = {
 	frameShadow: 'rgba(0,0,0,0.45)',
 }
 const CANVAS_FONT = "'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', system-ui, sans-serif"
+// 深色主題的卡片色板:同色相、明度大幅壓低 — 亮紙卡在森林夜背景上像日光燈,刺眼(Konva 讀不到 CSS var)
+const COLORS_DARK: Record<string, string> = {
+	yellow: '#cfa84e',
+	green: '#7fae74',
+	blue: '#6f94bf',
+	red: '#c08174',
+	note: '#8d7eb5',
+}
+// 壓暗後的卡上,色點/類型小標用更深的同色系維持對比
+const KIND_ACCENT_DARK: Record<string, string> = {
+	yellow: '#6e5212',
+	green: '#2c5e36',
+	blue: '#27466e',
+	red: '#7a3a32',
+	note: '#473a6b',
+}
+// 卡面的墨色/雜項(卡始終是「紙」,兩主題的字都維持深色)
+const CARD_LIGHT = {
+	text: '#1f1c18',
+	num: 'rgba(28,26,23,0.4)',
+	chipBg: 'rgba(28,26,23,0.1)',
+	chipText: 'rgba(28,26,23,0.6)',
+	ownerBg: 'rgba(180,83,10,0.18)',
+	ownerText: '#8a3f08',
+	stroke: 'rgba(255,255,255,0.45)',
+	selStroke: '#1c1a17',
+}
+const CARD_DARK = {
+	text: '#171310',
+	num: 'rgba(15,12,9,0.55)',
+	chipBg: 'rgba(0,0,0,0.2)',
+	chipText: 'rgba(15,12,9,0.75)',
+	ownerBg: 'rgba(46,21,4,0.32)',
+	ownerText: '#33180a',
+	stroke: 'rgba(0,0,0,0.25)',
+	selStroke: '#f0ead9',
+}
 const KIND_LABEL: Record<string, string> = { yellow: '主題', green: '待辦', blue: '決議', red: '風險', note: '備註' }
 const KIND_ORDER = ['yellow', 'green', 'blue', 'red'] as const
 // board types (mirror of server/board-types.ts, for the picker + badge)
@@ -251,6 +288,15 @@ export default function App() {
 		try { localStorage.setItem('mc-theme', next) } catch {}
 	}
 	const ct = theme === 'dark' ? CANVAS_DARK : CANVAS_LIGHT // canvas (Konva) palette for this theme
+	const cc = theme === 'dark' ? CARD_DARK : CARD_LIGHT // 卡面墨色/雜項
+	const cardColor = (c: string) => (theme === 'dark' ? COLORS_DARK[c] : COLORS[c]) ?? c
+	const kindAccent = (c: string) => (theme === 'dark' ? KIND_ACCENT_DARK[c] : KIND_ACCENT[c]) ?? '#1c1a17'
+	// 類型小標只在「會議板」語意下成立(其他板型同一顏色另有意義,標了反而誤導)
+	const isMeetingFrame = (frameId?: string) => {
+		if (!frameId) return boardTypeKey === 'meeting'
+		const f = frames.find((x: any) => x.id === frameId)
+		return (f?.type || 'meeting') === 'meeting'
+	}
 	const [selectedId, setSelectedId] = useState<string | null>(null)
 	// each card's editor number (1-based) — same id-sorted order the agent sees, so you can
 	// say "把 3 號移到…" as a precise fallback when the AI can't infer which card you mean
@@ -2008,21 +2054,24 @@ ${boardImg}
 									cornerRadius={16}
 									fillLinearGradientStartPoint={{ x: 0, y: 0 }}
 									fillLinearGradientEndPoint={{ x: 0, y: s.h }}
-									fillLinearGradientColorStops={[0, lighten(COLORS[s.color] ?? s.color), 1, COLORS[s.color] ?? s.color]}
+									fillLinearGradientColorStops={[0, lighten(cardColor(s.color), theme === 'dark' ? 0.05 : 0.09), 1, cardColor(s.color)]}
 									shadowColor="#1c1a17"
 									shadowOpacity={selected ? 0.28 : 0.17}
 									shadowBlur={selected ? 26 : 18}
 									shadowOffsetY={selected ? 12 : 8}
 									shadowForStrokeEnabled={false}
-									stroke={pending ? ACCENT : selected ? '#1c1a17' : 'rgba(255,255,255,0.45)'}
+									stroke={pending ? ACCENT : selected ? cc.selStroke : cc.stroke}
 									strokeWidth={pending ? 3 : selected ? 2 : 1}
 									{...PERF}
 								/>
-								{/* kind accent dot */}
-								<Circle x={18} y={18} radius={5} fill={KIND_ACCENT[s.color] ?? '#1c1a17'} opacity={0.8} listening={false} {...PERF} />
+								{/* kind accent dot + 類型小標(只在會議板語意下顯示,其他板型同色另有意義) */}
+								<Circle x={18} y={18} radius={5} fill={kindAccent(s.color)} opacity={0.8} listening={false} {...PERF} />
+								{!(s as any).note && isMeetingFrame(s.frameId) && KIND_LABEL[s.color] && (
+									<Text x={28} y={12} text={KIND_LABEL[s.color]} fontSize={10} fontStyle="600" fontFamily={CANVAS_FONT} fill={kindAccent(s.color)} opacity={0.85} listening={false} {...PERF} />
+								)}
 								{/* editor number (fallback handle: "把 N 號…") — not on notes */}
 								{!(s as any).note && cardNum[s.id] && (
-									<Text x={s.w - 30} y={11} width={20} align="right" text={String(cardNum[s.id])} fontSize={12} fontStyle="600" fontFamily={CANVAS_FONT} fill="rgba(28,26,23,0.4)" listening={false} {...PERF} />
+									<Text x={s.w - 30} y={11} width={20} align="right" text={String(cardNum[s.id])} fontSize={12} fontStyle="600" fontFamily={CANVAS_FONT} fill={cc.num} listening={false} {...PERF} />
 								)}
 								<Text
 									text={s.text}
@@ -2033,7 +2082,7 @@ ${boardImg}
 									lineHeight={1.25}
 									fontFamily={CANVAS_FONT}
 									fontStyle="500"
-									fill="#1f1c18"
+									fill={cc.text}
 									align="center"
 									verticalAlign="middle"
 									listening={false}
@@ -2041,7 +2090,7 @@ ${boardImg}
 								/>
 								{/* content tags (top row) — click to filter by tag */}
 								{(() => {
-									let tx = 32
+									let tx = !(s as any).note && isMeetingFrame(s.frameId) && KIND_LABEL[s.color] ? 56 : 32
 									return (s.tags || []).slice(0, 2).map((t, i) => {
 										const w = t.length * 11 + 12
 										const x = tx
@@ -2054,8 +2103,8 @@ ${boardImg}
 												onClick={(e: any) => { e.cancelBubble = true; setFilter({ type: 'tag', value: t }) }}
 												onTap={(e: any) => { e.cancelBubble = true; setFilter({ type: 'tag', value: t }) }}
 											>
-												<Rect width={w} height={17} cornerRadius={8} fill="rgba(28,26,23,0.1)" {...PERF} />
-												<Text x={6} y={3} text={t} fontSize={10.5} fontFamily={CANVAS_FONT} fill="rgba(28,26,23,0.6)" listening={false} {...PERF} />
+												<Rect width={w} height={17} cornerRadius={8} fill={cc.chipBg} {...PERF} />
+												<Text x={6} y={3} text={t} fontSize={10.5} fontFamily={CANVAS_FONT} fill={cc.chipText} listening={false} {...PERF} />
 											</Group>
 										)
 									})
@@ -2072,8 +2121,8 @@ ${boardImg}
 											onClick={(e: any) => { e.cancelBubble = true; setFilter({ type: 'owner', value: person }) }}
 											onTap={(e: any) => { e.cancelBubble = true; setFilter({ type: 'owner', value: person }) }}
 										>
-											<Rect width={w} height={19} cornerRadius={9.5} fill={s.owner ? 'rgba(180,83,10,0.18)' : 'rgba(28,26,23,0.1)'} {...PERF} />
-											<Text x={9} y={3.5} text={person} fontSize={11} fontFamily={CANVAS_FONT} fontStyle={s.owner ? '600' : 'normal'} fill={s.owner ? '#8a3f08' : 'rgba(28,26,23,0.6)'} listening={false} {...PERF} />
+											<Rect width={w} height={19} cornerRadius={9.5} fill={s.owner ? cc.ownerBg : cc.chipBg} {...PERF} />
+											<Text x={9} y={3.5} text={person} fontSize={11} fontFamily={CANVAS_FONT} fontStyle={s.owner ? '600' : 'normal'} fill={s.owner ? cc.ownerText : cc.chipText} listening={false} {...PERF} />
 										</Group>
 									)
 								})()}
@@ -2208,6 +2257,10 @@ ${boardImg}
 								top: view.y + (f.y + 6) * view.scale,
 								width: Math.max(120, (f.w - 70) * view.scale),
 								fontSize: 14 * view.scale,
+								// 跟畫布上的標題同字體/字重,編輯時不再「換一張臉」
+								fontFamily: CANVAS_FONT,
+								fontWeight: 600,
+								color: 'var(--ink)',
 								padding: '3px 8px',
 								border: '2px solid var(--accent)',
 								borderRadius: 6,
