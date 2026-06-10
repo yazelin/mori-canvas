@@ -151,6 +151,12 @@ function resolveRoom(): string {
 	}
 	return r
 }
+// ?board=<id> 深連結:進房後若房間是空的,自動載入該範本(examples/ 或 templates/)。
+// id 只允許 [a-z0-9-],所以永遠只會指到我們自己站上的靜態 JSON,不可能打到外部網址。
+function resolveBoardParam(): string {
+	const b = new URLSearchParams(location.search).get('board') || ''
+	return /^[a-z0-9-]+$/.test(b) ? b : ''
+}
 
 const ACCENT = '#b4530a'
 // lighten a #rrggbb toward white (for the soft top of the sticky gradient)
@@ -284,6 +290,10 @@ export default function App() {
 	// 範例庫:persona 範例板(client/public/examples/*.json),載入即還原成完整示範畫板
 	const [examplesOpen, setExamplesOpen] = useState(false)
 	const [exampleIndex, setExampleIndex] = useState<any[]>([])
+	// 社群範本(client/public/templates/*.json,社群 PR 投稿;索引空就不顯示該區)
+	const [templateIndex, setTemplateIndex] = useState<any[]>([])
+	// ?board= 深連結:首次同步後只消費一次
+	const boardParam = useRef(resolveBoardParam())
 	// 互動導覽:spotlight 逐步指向真實按鈕;-1 = 未啟動
 	const [tourStep, setTourStep] = useState(-1)
 	const [boardTypeKey, setBoardTypeKey] = useState('meeting') // synced board type
@@ -635,16 +645,20 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 			setBusy(`已還原畫板:${data.shapes.length} 張卡、${(data.frames || []).length} 張圖`)
 			setExportOpen(false)
 		}
-		// 範例庫:索引懶載入 + 載入單一範例(套資料後叫 server 依板型排版)
+		// 範例庫:索引懶載入(內建 examples + 社群 templates)+ 載入單一範例(套資料後叫 server 依板型排版)
 		async function openExamples() {
 			setExamplesOpen(true)
 			if (!exampleIndex.length) {
 				const d = await fetch('examples/index.json').then((r) => r.json()).catch(() => null)
 				if (d?.examples) setExampleIndex(d.examples)
 			}
+			if (!templateIndex.length) {
+				const d = await fetch('templates/index.json').then((r) => r.json()).catch(() => null)
+				if (Array.isArray(d?.examples) && d.examples.length) setTemplateIndex(d.examples)
+			}
 		}
-		async function loadExample(id: string) {
-			const data = await fetch(`examples/${id}.json`).then((r) => r.json()).catch(() => null)
+		async function loadExample(id: string, dir: 'examples' | 'templates' = 'examples') {
+			const data = await fetch(`${dir}/${id}.json`).then((r) => r.json()).catch(() => null)
 			if (!data || !Array.isArray(data.shapes)) {
 				setBusy('範例載入失敗')
 				return
@@ -655,6 +669,14 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 			setExamplesOpen(false)
 			setGuide(false)
 			setBusy(`已載入範例:${data.shapes.length} 張卡、${(data.frames || []).length} 張圖`)
+		}
+		// 範例分享連結:新隨機房號 + board id —— 別人點開,新房自動長出這份範本
+		function copyBoardLink(id: string) {
+			const url = `${location.origin}${location.pathname}?room=${genCode()}&board=${id}`
+			navigator.clipboard
+				?.writeText(url)
+				.then(() => setBusy('已複製分享連結:開新房自動載入這份範本'))
+				.catch(() => window.prompt('複製這條分享連結:', url))
 		}
 		function pickAndImportBoard() {
 			const inp = document.createElement('input')
@@ -736,6 +758,32 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 			provider.destroy()
 		}
 	}, [yShapes, yConnectors, yMeta, yFrames, provider])
+
+	// ?board= 深連結:首次同步完成後消費一次 —— 房間是空的才套範本(examples/ 優先、templates/ 後備),
+	// 已有內容就略過,避免蓋掉別人正在用的板。
+	const boardAutoloadDone = useRef(false)
+	useEffect(() => {
+		const id = boardParam.current
+		if (!id || boardAutoloadDone.current || status !== 'synced') return
+		boardAutoloadDone.current = true
+		if (yShapes.size > 0 || yFrames.size > 0) {
+			setBusy('此房已有內容,略過範本載入')
+			return
+		}
+		;(async () => {
+			const get = (dir: string) =>
+				fetch(`${dir}/${id}.json`).then((r) => (r.ok ? r.json() : null)).catch(() => null)
+			const data = (await get('examples')) || (await get('templates'))
+			if (!data || !Array.isArray(data.shapes)) {
+				setBusy(`找不到範本「${id}」`)
+				return
+			}
+			applyBoardData(data)
+			await fetch(`${SYNC_HTTP}/api/rooms/${encodeURIComponent(room)}/tidy`, { method: 'POST' }).catch(() => null)
+			setGuide(false)
+			setBusy(`已載入範本:${data.shapes.length} 張卡、${(data.frames || []).length} 張圖`)
+		})()
+	}, [status])
 
 	// keyboard: undo/redo + delete (but not while editing text)
 	useEffect(() => {
@@ -1543,36 +1591,58 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 							載入一份完整範例,看 AI 整理出來長什麼樣;展開「講法示範」可以照著講一遍,長出自己的板。
 						</div>
 						{!exampleIndex.length && <div className="muted" style={{ fontSize: 13 }}>載入範例清單中…</div>}
-						{exampleIndex.map((ex: any) => (
-							<div key={ex.id} style={{ border: '1px solid var(--line)', borderRadius: 14, padding: '12px 14px', marginBottom: 10 }}>
-								<div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-									<div style={{ flex: 1, minWidth: 0 }}>
-										<div style={{ fontWeight: 600, fontSize: 14 }}>
-											{ex.persona} · {ex.title}
+						{(() => {
+							// 內建範例與社群範本共用同一張卡片(只差載入來源目錄)
+							const boardCard = (ex: any, dir: 'examples' | 'templates') => (
+								<div key={`${dir}/${ex.id}`} style={{ border: '1px solid var(--line)', borderRadius: 14, padding: '12px 14px', marginBottom: 10 }}>
+									<div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+										<div style={{ flex: 1, minWidth: 0 }}>
+											<div style={{ fontWeight: 600, fontSize: 14 }}>
+												{ex.persona} · {ex.title}
+											</div>
+											<div style={{ fontSize: 12.5, color: 'var(--ink-soft)', margin: '3px 0 6px' }}>{ex.blurb}</div>
+											<div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+												{(ex.boards || []).map((b: string) => (
+													<span key={b} className="muted" style={{ fontSize: 11, border: '1px solid var(--line)', borderRadius: 999, padding: '2px 9px' }}>{b}</span>
+												))}
+											</div>
 										</div>
-										<div style={{ fontSize: 12.5, color: 'var(--ink-soft)', margin: '3px 0 6px' }}>{ex.blurb}</div>
-										<div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-											{(ex.boards || []).map((b: string) => (
-												<span key={b} className="muted" style={{ fontSize: 11, border: '1px solid var(--line)', borderRadius: 999, padding: '2px 9px' }}>{b}</span>
-											))}
+										<div style={{ flex: '0 0 auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
+											<button className="btn-accent" style={{ padding: '7px 16px' }} onClick={() => loadExample(ex.id, dir)}>
+												載入
+											</button>
+											<button style={{ padding: '5px 10px', fontSize: 11.5 }} title="複製含新房號的連結,別人點開就在新房自動長出這份範本" onClick={() => copyBoardLink(ex.id)}>
+												複製分享連結
+											</button>
 										</div>
 									</div>
-									<button className="btn-accent" style={{ flex: '0 0 auto', padding: '7px 16px' }} onClick={() => loadExample(ex.id)}>
-										載入
-									</button>
+									{(ex.sampleUtterances || []).length > 0 && (
+										<details style={{ marginTop: 8 }}>
+											<summary style={{ cursor: 'pointer', fontSize: 12, color: 'var(--accent)' }}>講法示範:開會這樣講,AI 就會長出這張板</summary>
+											<ul style={{ margin: '6px 0 0', paddingLeft: 18, fontSize: 12.5, color: 'var(--ink-soft)', lineHeight: 1.7 }}>
+												{ex.sampleUtterances.map((u: string, i: number) => (
+													<li key={i}>「{u}」</li>
+												))}
+											</ul>
+										</details>
+									)}
 								</div>
-								{(ex.sampleUtterances || []).length > 0 && (
-									<details style={{ marginTop: 8 }}>
-										<summary style={{ cursor: 'pointer', fontSize: 12, color: 'var(--accent)' }}>講法示範:開會這樣講,AI 就會長出這張板</summary>
-										<ul style={{ margin: '6px 0 0', paddingLeft: 18, fontSize: 12.5, color: 'var(--ink-soft)', lineHeight: 1.7 }}>
-											{ex.sampleUtterances.map((u: string, i: number) => (
-												<li key={i}>「{u}」</li>
-											))}
-										</ul>
-									</details>
-								)}
-							</div>
-						))}
+							)
+							return (
+								<>
+									{exampleIndex.map((ex: any) => boardCard(ex, 'examples'))}
+									{templateIndex.length > 0 && (
+										<>
+											<div className="code" style={{ fontSize: 17, color: 'var(--ink)', margin: '14px 0 2px' }}>社群範本</div>
+											<div style={{ color: 'var(--ink-soft)', fontSize: 12, margin: '0 0 10px' }}>
+												社群投稿的範本(<a href="https://github.com/yazelin/mori-canvas/blob/main/client/public/templates/README.md" target="_blank" rel="noreferrer" style={{ color: 'var(--accent)' }}>投稿規範</a>)。
+											</div>
+											{templateIndex.map((ex: any) => boardCard(ex, 'templates'))}
+										</>
+									)}
+								</>
+							)
+						})()}
 						<div className="muted" style={{ fontSize: 11.5 }}>載入會覆蓋目前畫板(覆蓋前會先確認);想保留現況可先「匯出 → 畫板存檔」。</div>
 					</div>
 				</div>
