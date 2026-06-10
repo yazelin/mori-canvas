@@ -210,6 +210,14 @@ fn is_loopback_addr(addr: Option<std::net::SocketAddr>) -> bool {
         None => false,
     }
 }
+/// 「真正的本機管理員」判定:socket 來源是 loopback **且**沒有經過 proxy(無 XFF)。
+/// 關鍵:Render / 同主機 nginx 反代是用 loopback 連到 app,於是每個外部訪客的 socket
+/// 看起來都是 loopback —— 只看 is_loopback_addr 會把全世界都當管理員。帶了 X-Forwarded-For
+/// 就代表這是被轉發進來的請求,絕不是直連本機的管理員,host 級設定一律不放行(除非帶對 token)。
+fn is_trusted_local(addr: Option<std::net::SocketAddr>, xff: &Option<String>) -> bool {
+    let proxied = xff.as_ref().map(|s| !s.trim().is_empty()).unwrap_or(false);
+    is_loopback_addr(addr) && !proxied
+}
 /// 設定/管理端點的鑑權等級(純函數供測試)。
 #[derive(Debug, PartialEq, Clone, Copy)]
 enum SettingsAccess {
@@ -1064,9 +1072,9 @@ pub async fn serve(port: u16) {
         }
         Ok::<_, warp::Rejection>(warp::reply::json(&o))
     });
-    let settings_post = warp::post().and(warp::path!("api" / "settings")).and(warp::header::optional::<String>("x-admin-token")).and(warp::addr::remote()).and(warp::body::json()).and_then(|token: Option<String>, addr: Option<std::net::SocketAddr>, body: Value| async move {
+    let settings_post = warp::post().and(warp::path!("api" / "settings")).and(warp::header::optional::<String>("x-admin-token")).and(warp::addr::remote()).and(warp::header::optional::<String>("x-forwarded-for")).and(warp::body::json()).and_then(|token: Option<String>, addr: Option<std::net::SocketAddr>, xff: Option<String>, body: Value| async move {
         use warp::Reply;
-        let access = settings_access(ADMIN_TOKEN.as_deref(), token.as_deref(), is_loopback_addr(addr));
+        let access = settings_access(ADMIN_TOKEN.as_deref(), token.as_deref(), is_trusted_local(addr, &xff));
         // 設了 ADMIN_TOKEN 而 token 不對:整個請求 401(個人偏好也不放行)
         if !access.allows_personal_fields() {
             return Ok::<_, warp::Rejection>(admin_locked_reply());
@@ -1588,6 +1596,18 @@ mod tests {
         assert!(!is_loopback_addr(p("[2001:db8::1]:9999")));
         // 拿不到來源位址(理論上不會發生)一律當非 loopback,寧可鎖不可放
         assert!(!is_loopback_addr(None));
+    }
+
+    #[test]
+    fn trusted_local_requires_loopback_and_no_proxy() {
+        let p = |s: &str| Some(s.parse::<std::net::SocketAddr>().unwrap());
+        // 直連本機、無 proxy = 真管理員
+        assert!(is_trusted_local(p("127.0.0.1:9999"), &None));
+        assert!(is_trusted_local(p("[::1]:9999"), &Some("".into()))); // 空 XFF 不算 proxy
+        // 關鍵:Render/反代用 loopback 連進來,但帶了 XFF → 不是管理員(否則人人 Full 權限)
+        assert!(!is_trusted_local(p("127.0.0.1:9999"), &Some("1.2.3.4".into())));
+        // 非 loopback 一律不是
+        assert!(!is_trusted_local(p("10.0.0.5:9999"), &None));
     }
 
     #[test]
