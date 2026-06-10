@@ -214,6 +214,19 @@ export default function App() {
 	const transcriptEndRef = useRef<HTMLDivElement | null>(null)
 	const [connectors, setConnectors] = useState<Connector[]>([])
 	const [status, setStatus] = useState('connecting')
+	// 連線狀態的中文呈現(y-websocket 給的是英文 raw status)
+	const statusZh = (s: string) =>
+		s === 'synced' ? '已連線' : s === 'connecting' ? '連線中…' : s === 'connected' ? '同步中…' : s === 'disconnected' ? '斷線,重連中…' : s
+	// 連線卡超過 5 秒 → 顯示說明 banner(典型場景:免費主機冷啟動 / 斷網)
+	const [connSlow, setConnSlow] = useState(false)
+	useEffect(() => {
+		if (status === 'synced') {
+			setConnSlow(false)
+			return
+		}
+		const t = setTimeout(() => setConnSlow(true), 5000)
+		return () => clearTimeout(t)
+	}, [status])
 	const [size, setSize] = useState({ w: window.innerWidth, h: window.innerHeight })
 	const [view, setView] = useState({ x: 0, y: 0, scale: 1 }) // canvas pan/zoom
 	const [theme, setTheme] = useState(() => (typeof document !== 'undefined' ? document.documentElement.getAttribute('data-theme') || 'light' : 'light'))
@@ -1861,7 +1874,7 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 						<span className="code" style={{ fontSize: 17, color: 'var(--accent)' }}>{room}</span>
 						<button className="btn-accent" style={{ padding: '5px 11px' }} data-tour="share" onClick={() => setShareOpen(true)}>分享</button>
 						<span style={{ flex: 1 }} />
-						<span className="muted" style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{status === 'synced' ? '已連線' : status}·{shapes.length}</span>
+						<span className="muted" style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{statusZh(status)}·{shapes.length}</span>
 						<button style={btn} title="更多" onClick={() => setMenuOpen((v) => !v)}>⋯</button>
 					</div>
 					{menuOpen && (
@@ -1884,9 +1897,21 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 					<span className="muted" style={{ fontSize: 12 }}>房號</span>
 					<span className="code" style={{ fontSize: 19, color: 'var(--accent)', marginRight: 2 }}>{room}</span>
 					<button title="分享這間會議室:QR、房號、邀請連結" className="btn-accent" data-tour="share" onClick={() => setShareOpen(true)}>分享 / QR</button>
-					<span className="muted" style={{ fontSize: 12 }} title={status === 'synced' ? '已即時連線' : status}>
-						{status === 'synced' ? '已連線' : status} · {shapes.length} 張
+					<span className="muted" style={{ fontSize: 12 }} title={status === 'synced' ? '已即時連線' : statusZh(status)}>
+						{statusZh(status)} · {shapes.length} 張
 					</span>
+				</div>
+			)}
+
+			{/* 連線狀態 banner:斷線立即說明(yjs 會 queue 編輯,連回自動同步);連線中卡 5 秒以上 = 多半是免費主機冷啟動 */}
+			{(status === 'disconnected' || (status !== 'synced' && connSlow)) && (
+				<div
+					className="glass"
+					style={{ position: 'fixed', top: 58, left: 0, right: 0, marginInline: 'auto', width: 'fit-content', maxWidth: '92vw', zIndex: 999, padding: '6px 16px', fontSize: 12.5, color: 'var(--ink-soft)' }}
+				>
+					{status === 'disconnected'
+						? '已斷線,正在重連 — 放心,這段期間的編輯會在連回後自動同步'
+						: '主機喚醒中…(免費示範站閒置會休眠,第一次連上約需 30 秒)'}
 				</div>
 			)}
 
