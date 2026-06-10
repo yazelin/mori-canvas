@@ -1,4 +1,7 @@
 {
+	"app": {
+		"title": "Mori Canvas — Shared Whiteboard"
+	},
 	"kind": {
 		"yellow": "Topic",
 		"green": "To-do",

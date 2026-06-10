@@ -1,4 +1,7 @@
 {
+	"app": {
+		"title": "Mori Canvas 共筆白板"
+	},
 	"kind": {
 		"yellow": "主題",
 		"green": "待辦",

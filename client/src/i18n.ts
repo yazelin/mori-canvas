@@ -22,9 +22,11 @@ i18n.use(initReactI18next).init({
 	returnEmptyString: true,
 })
 
-// keep <html lang> in sync (a11y / font selection / search engines)
+// keep <html lang> + the visible tab title in sync (a11y / font selection / search engines)
+// (index.html 的 SEO/OG meta 是靜態 zh 預設;站點級英文頁屬 Pages 改版範圍)
 const syncHtmlLang = (lng: string) => {
 	document.documentElement.lang = lng === 'en' ? 'en' : 'zh-TW'
+	document.title = i18n.t('app.title')
 }
 syncHtmlLang(i18n.language)
 i18n.on('languageChanged', syncHtmlLang)
