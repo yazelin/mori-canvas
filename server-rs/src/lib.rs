@@ -1,3 +1,5 @@
+// warp 的 filter 鏈是巨型嵌套型別,加上 rate_limit() 前置 filter 後超過預設遞迴上限
+#![recursion_limit = "256"]
 mod agent;
 mod apply;
 mod board_types;
@@ -191,28 +193,74 @@ fn demo_rate_per_min() -> Option<u32> {
 }
 static RATE_HITS: Lazy<Mutex<HashMap<String, Vec<std::time::Instant>>>> =
     Lazy::new(|| Mutex::new(HashMap::new()));
-fn client_ip(xff: &Option<String>) -> String {
-    xff.as_ref()
-        .and_then(|s| s.split(',').next())
-        .map(|s| s.trim().to_string())
+/// XFF 整串可被 client 偽造,只信「最後一跳」(最近的受信 proxy 附加的那筆);
+/// 沒有 proxy(自架直連)就退回 socket 位址,限流才真的 per-IP。
+fn client_ip(xff: &Option<String>, addr: &Option<std::net::SocketAddr>) -> String {
+    if let Some(last) = xff
+        .as_ref()
+        .and_then(|s| s.split(',').next_back())
+        .map(str::trim)
         .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "?".into())
+    {
+        return last.to_string();
+    }
+    addr.map(|a| a.ip().to_string()).unwrap_or_else(|| "?".into())
 }
-/// sliding 60s window; returns false (blocked) when over the per-minute limit. No limit set => always ok.
-async fn rate_ok(ip: &str) -> bool {
+/// sliding 60s window。回 None = 放行;回 Some(secs) = 超限,secs 後再試。No limit set => always ok.
+async fn rate_wait(ip: &str) -> Option<u64> {
     let limit = match demo_rate_per_min() {
         Some(n) => n as usize,
-        None => return true,
+        None => return None,
     };
     let now = std::time::Instant::now();
     let mut m = RATE_HITS.lock().await;
     let hits = m.entry(ip.to_string()).or_default();
     hits.retain(|t| now.duration_since(*t).as_secs() < 60);
     if hits.len() >= limit {
-        return false;
+        let oldest = hits.iter().min().copied().unwrap_or(now);
+        return Some(60u64.saturating_sub(now.duration_since(oldest).as_secs()).max(1));
     }
     hits.push(now);
-    true
+    None
+}
+/// 限流回應:HTTP 429 + Retry-After,JSON 帶 retryAfterSeconds 讓 client 自動退避續傳
+fn rate_limited_reply(wait: u64) -> warp::reply::Response {
+    use warp::Reply;
+    let mut res = warp::reply::json(&json!({
+        "ok": false,
+        "error": format!("太頻繁了,休息 {wait} 秒再試(demo 限流)"),
+        "rateLimited": true,
+        "retryAfterSeconds": wait,
+    }))
+    .into_response();
+    *res.status_mut() = warp::http::StatusCode::TOO_MANY_REQUESTS;
+    if let Ok(v) = warp::http::HeaderValue::from_str(&wait.to_string()) {
+        res.headers_mut().insert("Retry-After", v);
+    }
+    res
+}
+#[derive(Debug)]
+struct RateLimited(u64);
+impl warp::reject::Reject for RateLimited {}
+/// 掛在吃 AI/STT 的端點前面:超限就以 custom rejection 中斷,由 recover 轉成 429
+fn rate_limit() -> impl Filter<Extract = (), Error = warp::Rejection> + Clone {
+    warp::header::optional::<String>("x-forwarded-for")
+        .and(warp::addr::remote())
+        .and_then(
+            |xff: Option<String>, addr: Option<std::net::SocketAddr>| async move {
+                match rate_wait(&client_ip(&xff, &addr)).await {
+                    Some(w) => Err(warp::reject::custom(RateLimited(w))),
+                    None => Ok(()),
+                }
+            },
+        )
+        .untuple_one()
+}
+async fn handle_rejection(err: warp::Rejection) -> Result<warp::reply::Response, warp::Rejection> {
+    if let Some(RateLimited(w)) = err.find::<RateLimited>() {
+        return Ok(rate_limited_reply(*w));
+    }
+    Err(err)
 }
 fn sponsor_config() -> Value {
     let g = |k: &str| std::env::var(k).ok().filter(|s| !s.is_empty());
@@ -828,21 +876,12 @@ pub async fn serve(port: u16) {
     let r_agent = rooms.clone();
     let agent_ep = warp::post()
         .and(warp::path!("api" / "agent" / String))
+        .and(rate_limit())
         .and(warp::body::json())
         .and(with(r_agent))
-        .and(warp::header::optional::<String>("x-forwarded-for"))
         .and(llm_opts())
         .and_then(
-            |name: String,
-             body: Value,
-             rooms: sync::Rooms,
-             xff: Option<String>,
-             llm: llm::LlmOpts| async move {
-                if !rate_ok(&client_ip(&xff)).await {
-                    return Ok::<_, warp::Rejection>(warp::reply::json(
-                        &json!({ "ok": false, "error": "太頻繁了,休息一下再試(demo 限流)" }),
-                    ));
-                }
+            |name: String, body: Value, rooms: sync::Rooms, llm: llm::LlmOpts| async move {
                 let transcript = body
                     .get("transcript")
                     .and_then(|v| v.as_str())
@@ -900,16 +939,11 @@ pub async fn serve(port: u16) {
     // POST /api/transcribe — audio -> text (no agent)
     let transcribe_ep = warp::post()
         .and(warp::path!("api" / "transcribe"))
+        .and(rate_limit())
         .and(warp::query::<HashMap<String, String>>())
         .and(warp::body::bytes())
-        .and(warp::header::optional::<String>("x-forwarded-for"))
         .and_then(
-            |q: HashMap<String, String>, body: bytes::Bytes, xff: Option<String>| async move {
-                if !rate_ok(&client_ip(&xff)).await {
-                    return Ok::<_, warp::Rejection>(warp::reply::json(
-                        &json!({ "ok": false, "error": "太頻繁了,休息一下(demo 限流)" }),
-                    ));
-                }
+            |q: HashMap<String, String>, body: bytes::Bytes| async move {
                 let ext = sanitize_ext(q.get("ext").map(|s| s.as_str()).unwrap_or("webm"));
                 let tmp = write_tmp("t", &ext, &body).await;
                 let s = SETTINGS.lock().await.clone();
@@ -927,23 +961,17 @@ pub async fn serve(port: u16) {
     let r_voice = rooms.clone();
     let voice_ep = warp::post()
         .and(warp::path!("api" / "voice" / String))
+        .and(rate_limit())
         .and(warp::query::<HashMap<String, String>>())
         .and(warp::body::bytes())
         .and(with(r_voice))
-        .and(warp::header::optional::<String>("x-forwarded-for"))
         .and(llm_opts())
         .and_then(
             |name: String,
              q: HashMap<String, String>,
              body: bytes::Bytes,
              rooms: sync::Rooms,
-             xff: Option<String>,
              llm: llm::LlmOpts| async move {
-                if !rate_ok(&client_ip(&xff)).await {
-                    return Ok::<_, warp::Rejection>(warp::reply::json(
-                        &json!({ "ok": false, "error": "太頻繁了,休息一下(demo 限流)" }),
-                    ));
-                }
                 let ext = sanitize_ext(q.get("ext").map(|s| s.as_str()).unwrap_or("webm"));
                 let tmp = write_tmp("voice", &ext, &body).await;
                 let s = SETTINGS.lock().await.clone();
@@ -1006,11 +1034,8 @@ pub async fn serve(port: u16) {
 
     // POST /api/card/:room/:cardId — dictate one card's text/tags/owner/kind
     let r_card = rooms.clone();
-    let card_ep = warp::post().and(warp::path!("api" / "card" / String / String)).and(warp::query::<HashMap<String, String>>()).and(warp::body::bytes()).and(with(r_card)).and(warp::header::optional::<String>("x-forwarded-for")).and(llm_opts()).and_then(
-        |name: String, card_id: String, q: HashMap<String, String>, body: bytes::Bytes, rooms: sync::Rooms, xff: Option<String>, llm: llm::LlmOpts| async move {
-            if !rate_ok(&client_ip(&xff)).await {
-                return Ok::<_, warp::Rejection>(warp::reply::json(&json!({ "ok": false, "error": "太頻繁了,休息一下(demo 限流)" })));
-            }
+    let card_ep = warp::post().and(warp::path!("api" / "card" / String / String)).and(rate_limit()).and(warp::query::<HashMap<String, String>>()).and(warp::body::bytes()).and(with(r_card)).and(llm_opts()).and_then(
+        |name: String, card_id: String, q: HashMap<String, String>, body: bytes::Bytes, rooms: sync::Rooms, llm: llm::LlmOpts| async move {
             let ext = sanitize_ext(q.get("ext").map(|s| s.as_str()).unwrap_or("webm"));
             let tmp = write_tmp("c", &ext, &body).await;
             let s = SETTINGS.lock().await.clone();
@@ -1059,14 +1084,11 @@ pub async fn serve(port: u16) {
     let r_viz = rooms.clone();
     let visualize_ep = warp::post()
         .and(warp::path!("api" / "visualize"))
+        .and(rate_limit())
         .and(warp::body::json())
         .and(with(r_viz))
-        .and(warp::header::optional::<String>("x-forwarded-for"))
         .and(llm_opts())
-        .and_then(move |body: Value, rooms: sync::Rooms, xff: Option<String>, llm: llm::LlmOpts| async move {
-            if !rate_ok(&client_ip(&xff)).await {
-                return Ok::<_, warp::Rejection>(warp::reply::json(&json!({ "ok": false, "error": "太頻繁了,休息一下再試" })));
-            }
+        .and_then(move |body: Value, rooms: sync::Rooms, llm: llm::LlmOpts| async move {
             let transcript = body.get("transcript").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
             if transcript.is_empty() {
                 return Ok::<_, warp::Rejection>(warp::reply::json(&json!({ "ok": false, "error": "transcript required" })));
@@ -1174,7 +1196,7 @@ pub async fn serve(port: u16) {
                     .unwrap(),
             }
         });
-    let routes = api.or(ws).or(serve_client).with(cors);
+    let routes = api.or(ws).or(serve_client).recover(handle_rejection).with(cors);
     maybe_register_body_part(port);
     let _ = Arc::clone(&rooms);
 
@@ -1245,6 +1267,17 @@ mod tests {
             (true, None)
         );
         assert_eq!(apply_local_only_change(false, false, None), (false, None));
+    }
+
+    #[test]
+    fn client_ip_trusts_last_hop_and_socket_fallback() {
+        // XFF 前段可偽造,只信最後一跳
+        let xff = Some("99.99.99.99, 5.6.7.8".to_string());
+        assert_eq!(client_ip(&xff, &None), "5.6.7.8");
+        // 無 proxy 退回 socket 位址 → 自架直連也有真 per-IP 限流
+        let addr: Option<std::net::SocketAddr> = Some("9.9.9.9:1234".parse().unwrap());
+        assert_eq!(client_ip(&None, &addr), "9.9.9.9");
+        assert_eq!(client_ip(&None, &None), "?");
     }
 
     #[test]
