@@ -449,6 +449,11 @@ fn quadrant_positions(cards: &[Card], ox: f64, oy: f64, sp: f64) -> Pos {
     pos
 }
 
+/// 經典魚骨圖:問題卡(魚頭)置於最右,想像的水平脊線往左延伸;
+/// 主因卡沿脊線上、下交錯排列,各距脊線一段距離;每個主因的次因卡排在
+/// 主因「外側」(上方骨往上、下方骨往下),並沿斜骨方向逐張往魚尾(左)
+/// 錯開,形成教科書魚骨的斜骨視覺。每「對」骨(上、下各一)佔一條獨立
+/// 水平帶,帶與帶不重疊、上下側以脊線分隔,輸出本身即保證無重疊。
 fn fishbone_positions(
     cards: &[Card],
     conns: &[(String, String)],
@@ -460,7 +465,9 @@ fn fishbone_positions(
     if cards.is_empty() {
         return pos;
     }
+    let by_id: HashMap<&String, &Card> = cards.iter().map(|c| (&c.id, c)).collect();
     let (ids, children, _indeg) = build_graph(cards, conns);
+    // connectors 方向 = 原因→結果:沒有任何流出邊的節點就是問題卡(魚頭)
     let head = ids
         .iter()
         .find(|id| children.get(*id).map(|c| c.is_empty()).unwrap_or(true))
@@ -473,6 +480,7 @@ fn fishbone_positions(
             parents.get_mut(&t).unwrap().push(f.clone());
         }
     }
+    // 從魚頭沿 結果→原因 反向 BFS 推層級:0=問題、1=主因、2+=次因
     let mut level: HashMap<String, i64> = HashMap::new();
     level.insert(head.clone(), 0);
     let mut q: std::collections::VecDeque<(String, i64)> = std::collections::VecDeque::new();
@@ -493,37 +501,97 @@ fn fishbone_positions(
     for id in &ids {
         level.entry(id.clone()).or_insert(1);
     }
-    let mut by_level: HashMap<i64, Vec<String>> = HashMap::new();
-    for id in &ids {
-        by_level
-            .entry(*level.get(id).unwrap_or(&0))
-            .or_default()
-            .push(id.clone());
+    // 主因(骨):依卡片原始順序;偶數索引排脊線上方、奇數排下方 → 上下交錯
+    let bones: Vec<String> = ids
+        .iter()
+        .filter(|id| **id != head && *level.get(*id).unwrap_or(&1) == 1)
+        .cloned()
+        .collect();
+    if bones.is_empty() {
+        pos.insert(head.clone(), (ox, oy));
+        return pos;
     }
-    let max_lv = level.values().copied().max().unwrap_or(0) as f64;
-    let gx = 250.0 * sp;
-    let gy = 230.0 * sp;
-    let mut max_off = 1.0_f64;
-    for (lv, list) in &by_level {
-        if *lv > 0 {
-            max_off = max_off.max((list.len() as f64 / 2.0).ceil());
+    // 次因歸骨:沿 原因→結果 邊往魚頭方向走一步(level 恰好少 1 的 child)。
+    // 淺層先處理,深層才查得到所屬骨;DAG 雜邊找不到時退而掛在已知骨或第 0 根骨。
+    let mut bone_of: HashMap<String, usize> = bones
+        .iter()
+        .enumerate()
+        .map(|(i, b)| (b.clone(), i))
+        .collect();
+    let mut sub_ids: Vec<String> = ids
+        .iter()
+        .filter(|id| *level.get(*id).unwrap_or(&1) >= 2)
+        .cloned()
+        .collect();
+    sub_ids.sort_by_key(|id| *level.get(id).unwrap_or(&1));
+    let mut bone_subs: Vec<Vec<String>> = vec![vec![]; bones.len()];
+    for id in sub_ids {
+        let lv = *level.get(&id).unwrap_or(&1);
+        let ch = children.get(&id).cloned().unwrap_or_default();
+        let b = ch
+            .iter()
+            .find_map(|c| {
+                if *level.get(c).unwrap_or(&1) + 1 == lv {
+                    bone_of.get(c).copied()
+                } else {
+                    None
+                }
+            })
+            .or_else(|| ch.iter().find_map(|c| bone_of.get(c).copied()))
+            .unwrap_or(0);
+        bone_of.insert(id.clone(), b);
+        bone_subs[b].push(id);
+    }
+    // 幾何參數:沿骨往外每張的縱距、斜骨往魚尾的橫向錯位、主因距脊線距離、骨帶間距
+    let max_w = cards.iter().map(|c| c.w).fold(CARD_W, f64::max);
+    let max_h = cards.iter().map(|c| c.h).fold(CARD_H, f64::max);
+    let pitch = max_h + 40.0 * sp;
+    let dx = 60.0 * sp;
+    let main_off = 70.0 * sp;
+    let band_gap = 60.0 * sp;
+    let head_card = by_id[&head];
+    // 脊線高度:預留上方骨最深的外側延伸,確保最上面的次因仍不超出 oy
+    let mut above_ext = head_card.h / 2.0;
+    for (i, subs) in bone_subs.iter().enumerate() {
+        if i % 2 == 0 {
+            above_ext = above_ext.max(main_off + subs.len() as f64 * pitch + max_h);
         }
     }
-    let spine_y = oy + max_off * gy;
-    for (lv, list) in &by_level {
-        if *lv == 0 {
-            pos.insert(list[0].clone(), (ox + max_lv * gx, spine_y));
-            continue;
-        }
-        for (i, id) in list.iter().enumerate() {
+    let spine_y = oy + above_ext;
+    // 由左(魚尾)往右逐對放置;帶寬涵蓋該對最深的斜向錯位,主因卡靠帶右緣
+    let npairs = bones.len().div_ceil(2);
+    let mut cursor = ox;
+    for p in 0..npairs {
+        let lean = dx
+            * (p * 2..(p * 2 + 2).min(bones.len()))
+                .map(|i| bone_subs[i].len())
+                .max()
+                .unwrap_or(0) as f64;
+        let main_x = cursor + lean;
+        for i in p * 2..(p * 2 + 2).min(bones.len()) {
             let above = i % 2 == 0;
-            let y_off = ((i / 2) as f64 + 1.0) * gy * if above { -1.0 } else { 1.0 };
-            pos.insert(
-                id.clone(),
-                (ox + (max_lv - *lv as f64) * gx, spine_y + y_off),
-            );
+            let mc = by_id[&bones[i]];
+            let my = if above {
+                spine_y - main_off - mc.h
+            } else {
+                spine_y + main_off
+            };
+            pos.insert(bones[i].clone(), (main_x, my));
+            for (j, sid) in bone_subs[i].iter().enumerate() {
+                let sc = by_id[sid];
+                let out = (j as f64 + 1.0) * pitch;
+                let sy = if above {
+                    spine_y - main_off - out - sc.h
+                } else {
+                    spine_y + main_off + out
+                };
+                pos.insert(sid.clone(), (main_x - (j as f64 + 1.0) * dx, sy));
+            }
         }
+        cursor = main_x + max_w + band_gap;
     }
+    // 魚頭:最右、垂直置中於脊線
+    pos.insert(head.clone(), (cursor, spine_y - head_card.h / 2.0));
     pos
 }
 
@@ -882,6 +950,73 @@ mod tests {
             .map(|i| pos[&format!("g{}", i)].0 as i64)
             .collect();
         assert_eq!(xs.len(), 2);
+    }
+
+    #[test]
+    fn fishbone_classic_shape() {
+        // 1 問題(blue) + 4 主因(green) + 各 2 次因(yellow/red);connectors 方向 = 原因→結果
+        let mut cards = vec![mk("prob", "blue", 200.0, 200.0)];
+        let mut conns: Vec<(String, String)> = vec![];
+        for m in 0..4 {
+            let mid = format!("m{}", m);
+            cards.push(mk(&mid, "green", 200.0, 200.0));
+            conns.push((mid.clone(), "prob".to_string()));
+            for s in 0..2 {
+                let sid = format!("m{}s{}", m, s);
+                cards.push(mk(&sid, if s == 0 { "yellow" } else { "red" }, 200.0, 200.0));
+                conns.push((sid.clone(), mid.clone()));
+            }
+        }
+        let pos = fishbone_positions(&cards, &conns, 0.0, 0.0, 1.0);
+        assert_eq!(pos.len(), cards.len(), "all cards placed");
+        // 座標表(cargo test fishbone_classic_shape -- --nocapture 人工檢查形狀)
+        let mut rows: Vec<&Card> = cards.iter().collect();
+        rows.sort_by(|a, b| {
+            pos[&a.id]
+                .0
+                .partial_cmp(&pos[&b.id].0)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        for c in &rows {
+            let (x, y) = pos[&c.id];
+            println!("{:<6} {:<7} x={:>6.0} y={:>6.0}", c.id, c.color, x, y);
+        }
+        // (a) 無重疊
+        assert!(rects_disjoint(&cards, &pos), "cards overlap");
+        // (b) 問題卡 x 最大 → 魚頭在最右
+        let (px, py) = pos["prob"];
+        for c in &cards {
+            if c.id != "prob" {
+                assert!(pos[&c.id].0 < px, "{} 應在問題卡左側", c.id);
+            }
+        }
+        // (c) 主因卡沿脊線(問題卡垂直中心)上下交錯:上、下、上、下
+        let spine = py + 100.0;
+        for m in 0..4 {
+            let (_, my) = pos[&format!("m{}", m)];
+            if m % 2 == 0 {
+                assert!(my + 200.0 < spine, "m{} 應整張在脊線上方", m);
+            } else {
+                assert!(my > spine, "m{} 應整張在脊線下方", m);
+            }
+        }
+        // (d) 次因與主因同側且更外側(上方骨更上、下方骨更下),並沿斜骨往魚尾錯開
+        for m in 0..4 {
+            let (mx, my) = pos[&format!("m{}", m)];
+            let (mut prev_x, mut prev_y) = (mx, my);
+            for s in 0..2 {
+                let (sx, sy) = pos[&format!("m{}s{}", m, s)];
+                if m % 2 == 0 {
+                    assert!(sy + 200.0 <= my, "m{}s{} 應在主因上方外側", m, s);
+                    assert!(sy < prev_y, "m{}s{} 應比前一張更外側", m, s);
+                } else {
+                    assert!(sy >= my + 200.0, "m{}s{} 應在主因下方外側", m, s);
+                    assert!(sy > prev_y, "m{}s{} 應比前一張更外側", m, s);
+                }
+                assert!(sx < prev_x, "m{}s{} 應沿斜骨往魚尾(左)錯開", m, s);
+                (prev_x, prev_y) = (sx, sy);
+            }
+        }
     }
 
     #[test]

@@ -22,6 +22,12 @@ services:
       # The real money-guard is a spending cap on your Groq account.
       - key: DEMO_RATE_PER_MIN
         value: "60"
+      # room governance (demo): don't list room codes publicly (code = the key to enter),
+      # and expire rooms idle for 72h (DEMO room is exempt — it reseeds hourly anyway)
+      - key: PUBLIC_ROOM_LIST
+        value: "0"
+      - key: ROOM_TTL_HOURS
+        value: "72"
       # sponsor banner — public link, safe to keep here (the button points at it)
       - key: SPONSOR_URL
         value: https://buymeacoffee.com/yazelin
