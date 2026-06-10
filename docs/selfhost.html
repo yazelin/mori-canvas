@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="zh-TW">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>自架部署 — Mori Canvas 共筆白板</title>
+		<meta name="description" content="把 Mori Canvas 架在自己手上:單機 cargo build、GitHub Releases 預編譯包、Render 一鍵 Blueprint、環境變數總表、本機 whisper 與 Ollama、提示詞客製。全 MIT,資料自己管。" />
+		<meta name="theme-color" content="#faf7f1" />
+		<meta property="og:title" content="自架部署 — Mori Canvas 共筆白板" />
+		<meta property="og:description" content="單機跑、區網 HTTPS、Render 一鍵部署、環境變數、本機模式與提示詞客製,一頁講完。" />
+		<meta property="og:image" content="https://mori-canvas.onrender.com/og.png" />
+		<meta property="og:image:width" content="1200" />
+		<meta property="og:image:height" content="630" />
+		<meta name="twitter:card" content="summary_large_image" />
+		<meta name="twitter:image" content="https://mori-canvas.onrender.com/og.png" />
+		<link rel="preconnect" href="https://fonts.googleapis.com" />
+		<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+		<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet" />
+		<link rel="stylesheet" href="site.css" />
+	</head>
+	<body>
+		<nav class="topnav"><div class="nav-inner"><a class="brand" href="./">Mori Canvas</a><div class="links"><a href="./">首頁</a><a href="guide.html">操作手冊</a><a href="examples.html">範例教學</a><a class="on" href="selfhost.html">自架部署</a><a href="faq.html">常見問題</a><a class="try" href="https://mori-canvas.onrender.com/" target="_blank" rel="noreferrer">立即試玩</a></div></div></nav>
+
+		<header class="page">
+			<div class="wrap">
+				<h1>自架部署</h1>
+				<p class="lead">試玩版適合體驗,正式用建議架在自己手上:逐字稿與白板資料都留在你的主機、不受 demo 限流、全 MIT 零授權成本 —— 可閉源、可賣、可改。這頁從單機跑到上 Render,一次講完。</p>
+			</div>
+		</header>
+
+		<section id="arch">
+			<div class="wrap">
+				<h2><span class="num">一</span>架構一眼懂</h2>
+				<p>Mori Canvas 是 client–server:<b>所有重活(STT、AI 整理、白板狀態)都跑在「主機」那一台</b>,其他人只是用瀏覽器連進來,零安裝。自架就是決定「主機」放哪 —— 兩種跑法,理解流程一樣,差在跑在哪、STT/AI 在本機還是雲端。</p>
+				<h3>單機獨立執行 —— 自己的電腦跑</h3>
+				<p>server 跑在你的電腦,同事連你的區網 IP。語音與 AI 可走雲端 Groq,也可以全留本機(whisper-server + Ollama),資料完全不出門。</p>
+				<img class="shot" src="arch-local.png" alt="單機架構圖:server 跑在自己的電腦,瀏覽器透過區網連入,STT 與 AI 可選本機或雲端" />
+				<h3>上傳 Render 雲端執行</h3>
+				<p>server 跑在 Render 的容器,任何人開網址就能進(試玩站就是這樣架的)。AI 與 STT 走 Groq 雲端,用你後台填的 key;TLS 由 Render edge 終結,容器內只跑 HTTP。</p>
+				<img class="shot" src="arch-render.png" alt="Render 架構圖:GitHub repo 連 Render Blueprint 自動部署,瀏覽器經 HTTPS 連入,AI 走 Groq" />
+			</div>
+		</section>
+
+		<section id="local">
+			<div class="wrap">
+				<h2><span class="num">二</span>單機跑</h2>
+				<h3>需要裝什麼</h3>
+				<table>
+					<tr><th>要件</th><th>用途</th><th>必要性</th></tr>
+					<tr><td>Rust(cargo)</td><td>跑 server —— 一顆 binary,內嵌前端 + API + 即時同步</td><td>必要(用預編譯包則免)</td></tr>
+					<tr><td>Node.js 18+ / npm</td><td>只用來 build 前端;跑的時候不需要</td><td>build 時必要</td></tr>
+					<tr><td>Groq API key</td><td>「逐字稿 → 便利貼」的 AI;<code>~/.mori/config.json</code> 或環境變數 <code>GROQ_API_KEY</code></td><td>agent 必要(或走本機 Ollama / BYO)</td></tr>
+					<tr><td>ffmpeg</td><td>「自訂」STT 模式送轉錄前的靜音剪</td><td>要語音才需要</td></tr>
+					<tr><td>whisper(本機 whisper-server,或 mori-ear,或雲端 Groq Whisper)</td><td>「錄音 → 文字」,三選一,設定頁切</td><td>要語音才需要</td></tr>
+					<tr><td>Ollama + qwen3</td><td>Groq 連不到時的本機 AI 後備;也是「全本機」的 AI 那條腿</td><td>選用</td></tr>
+					<tr><td>openssl</td><td>產自簽憑證給「公司區網版」HTTPS 用</td><td>區網多人才需要</td></tr>
+				</table>
+				<p>只想打字、貼逐字稿不用語音?那 Node + Rust + 一把 Groq key 就夠了。</p>
+
+				<h3>從原始碼 build</h3>
+				<pre><code>git clone https://github.com/yazelin/mori-canvas &amp;&amp; cd mori-canvas
+npm install &amp;&amp; npm run build      # vite build(前端)→ cargo build --release(前端內嵌進 binary)
+./server-rs/target/release/mori-canvas-server   # 預設 http://0.0.0.0:1334</code></pre>
+				<p>開 <code>http://localhost:1334/?room=meet</code> 就能用。開發時用 <code>npm run dev</code>(編 + 跑 debug binary,同樣 :1334)。</p>
+
+				<h3>公司區網版(手機也能錄音)</h3>
+				<p>手機要用麥克風,瀏覽器規定必須 HTTPS。Rust server 自己 serve HTTPS,不需要額外的反向代理:</p>
+				<ol class="steps">
+					<li><code>npm run setup</code> —— 偵測本機 IP、產含該 IP 的自簽憑證(放 <code>certs/</code>,已 gitignore);換網路 IP 變了就重跑。</li>
+					<li><code>npm run build</code>(第一次、或改過前端後)。</li>
+					<li><code>npm run start:lan</code> —— 等於 <code>HTTPS=1 PORT=5174 BIND=0.0.0.0</code> 跑 release binary。</li>
+					<li>大家連 <code>https://你的區網IP:5174/?room=meet</code>;每台第一次接受一次自簽憑證警告即可(一次涵蓋頁面 + 同步 + 錄音)。</li>
+				</ol>
+				<p>注意:這個模式<b>沒有鑑權</b>,同 wifi 拿到網址的人就能進、會用到你的 Groq key。內網信任場合 OK,試完記得收(<code>kill $(lsof -ti tcp:5174)</code>);長期擺著建議放 nginx 反向代理後面。</p>
+
+				<h3>懶得 build?GitHub Releases 預編譯包</h3>
+				<p>打 <code>v*</code> tag 時 CI 會自動 build 兩種「下載即用」掛上 <a href="https://github.com/yazelin/mori-canvas/releases" target="_blank" rel="noreferrer">GitHub Releases</a>:</p>
+				<div class="cards">
+					<div class="card"><h4>server 包(tar.gz / zip)</h4><p><code>mori-canvas-server-v0.1.x-linux-x86_64.tar.gz</code> 與 <code>-windows-x86_64.zip</code>,內含單一 binary + 一頁 README.txt。解開、給一把 <code>GROQ_API_KEY</code>(環境變數或同資料夾 <code>.env</code>)、執行,開 <code>http://localhost:1334/</code>。多人開會用這個。</p></div>
+					<div class="card"><h4>桌面 App(Tauri 安裝檔)</h4><p>Windows <code>.msi</code>/<code>.exe</code>、Linux <code>.AppImage</code>/<code>.deb</code>,雙擊安裝開原生視窗。桌面版是 loopback 單機(:8731);要多人一起開會,請用 server 版。本機自己 build:<code>npm run build &amp;&amp; npm run tauri</code>。</p></div>
+				</div>
+			</div>
+		</section>
+
+		<section id="render">
+			<div class="wrap">
+				<h2><span class="num">三</span>部署到 Render</h2>
+				<p>repo 帶了 <code>render.yaml</code>(Blueprint)+ Dockerfile,連上 GitHub 就是一鍵部署:</p>
+				<ol class="steps">
+					<li>render.com → 用 GitHub 登入 → <b>New + → Blueprint → 選這個 repo</b>,Render 自動讀 <code>render.yaml</code>(runtime 是 Docker,免費方案、新加坡區、health check 走 <code>/api/health</code>)。</li>
+					<li>服務 <b>Environment → 填 <code>GROQ_API_KEY</code></b> —— 用一把專用 demo key,並在 Groq 後台<b>設花費上限</b>,這才是真正的錢包防線。填好按 Deploy。</li>
+					<li>之後每次 <code>git push</code>,Render 自動重部署(<code>render.yaml</code> 設了 <code>autoDeploy</code>)。</li>
+				</ol>
+				<p><code>render.yaml</code> 已預設好幾個 demo 防護,後台隨時可調:<code>DEMO_RATE_PER_MIN</code>(每 IP 每分鐘 AI/STT 請求上限,預設 60)、<code>SPONSOR_URL</code> / <code>SPONSOR_LABEL</code>(贊助按鈕)、<code>DEMO_NOTICE</code>(進站告示文字)。</p>
+				<div class="devnote">
+					<b>免費方案的脾氣。</b>閒置約 15 分鐘會休眠,下一個訪客要等 30–60 秒冷啟動;休眠 / 重部署會清掉房間資料(<code>.data/</code> 不持久),想留成果請用「匯出 → 下載畫板檔」。另外<b>不要在 Render 設 <code>HTTPS</code></b> —— TLS 由 Render edge 終結,容器內 serve HTTP 即可;<code>PORT</code> 也是 Render 自動注入,不用管。
+				</div>
+			</div>
+		</section>
+
+		<section id="env">
+			<div class="wrap">
+				<h2><span class="num">四</span>環境變數總表</h2>
+				<p>整理自 <code>.env.example</code> 與 README。本機可放 <code>.env</code>(已 gitignore);Render 在後台 Environment 填,別進 git。</p>
+				<table>
+					<tr><th>變數</th><th>作用</th><th>備註</th></tr>
+					<tr><td><code>GROQ_API_KEY</code></td><td>雲端 AI(畫卡)與 Groq Whisper 的 key</td><td>雲端部署必填;本機通常直接讀 <code>~/.mori/config.json</code>,可不設</td></tr>
+					<tr><td><code>PORT</code></td><td>監聽 port</td><td>本機預設 1334;Render 自動注入</td></tr>
+					<tr><td><code>BIND</code></td><td>綁定位址</td><td><code>0.0.0.0</code> 對外開放(<code>start:lan</code> 已帶)</td></tr>
+					<tr><td><code>HTTPS=1</code></td><td>自帶 TLS,讀 <code>certs/</code> 的憑證</td><td>只給自架區網用;Render 上不要設</td></tr>
+					<tr><td><code>DEMO_RATE_PER_MIN</code></td><td>每 IP 每分鐘 AI/STT 請求上限</td><td>demo 防護;真正的防線是 Groq 帳戶花費上限</td></tr>
+					<tr><td><code>SPONSOR_URL</code> / <code>SPONSOR_LABEL</code></td><td>贊助按鈕的連結與文字</td><td>選用</td></tr>
+					<tr><td><code>DEMO_NOTICE</code></td><td>試玩版進站告示文字</td><td>選用</td></tr>
+					<tr><td><code>MORI_CANVAS_REGISTER=1</code></td><td>啟動時寫 <code>~/.mori/mori-canvas-server.json</code> 服務描述,讓 AgentOS 能 dispatch 進來</td><td>桌面版啟動會自動做;standalone 不受影響</td></tr>
+					<tr><td><code>MORI_CANVAS_PROMPTS</code></td><td>提示詞覆寫目錄</td><td>見下方「提示詞客製」</td></tr>
+					<tr><td><code>WHISPER_MODEL</code></td><td>本機 whisper-server 用的模型</td><td>預設 small;有顯卡可換 <code>large-v3-turbo</code></td></tr>
+					<tr><td><code>LLM_LOCAL_ONLY</code></td><td>鎖定「全走本機」</td><td>server 目前還沒讀這個 env,見下節的老實話</td></tr>
+				</table>
+			</div>
+		</section>
+
+		<section id="ai-stt">
+			<div class="wrap">
+				<h2><span class="num">五</span>AI 與 STT 選項</h2>
+				<h3>AI(把逐字稿整理成卡片)</h3>
+				<p>預設走 Groq <code>gpt-oss-120b</code>,連不到時退本機 Ollama <code>qwen3</code>。key 與 model 讀 Mori 宇宙共用的 <code>~/.mori/config.json</code>(<code>providers.groq.api_key</code>),跟其他 mori app 共用一份設定;沒有這個檔就用 <code>GROQ_API_KEY</code> 環境變數或 <code>.env</code>。</p>
+				<h3>Bring Your Own AI</h3>
+				<p>訪客可在設定頁填<b>任何 OpenAI 相容的 base / key / model</b>(OpenAI、Gemini、Azure、Groq、本機 Ollama 都行),用自己的額度、不耗主機,key 只存瀏覽器。打 API 也行 —— 加 header <code>X-LLM-Base</code> / <code>X-LLM-Key</code> / <code>X-LLM-Model</code> 即可。</p>
+				<h3>STT 三條路(設定頁切)</h3>
+				<table>
+					<tr><th>模式</th><th>STT 怎麼來</th><th>適合</th></tr>
+					<tr><td>Mori 處理</td><td>委派 <code>mori-ear</code>(它自己決定本機 whisper / Groq);僅在偵測到 mori-ear 時可選</td><td>已裝 Mori 的人</td></tr>
+					<tr><td>自訂 · 雲端</td><td>Groq Whisper API,填自己的 Groq key</td><td>零安裝,首選</td></tr>
+					<tr><td>自訂 · 本機</td><td>打一台本機 whisper-server(<code>/inference</code>)</td><td>不想資料出網</td></tr>
+				</table>
+				<p>「自訂」模式送轉錄前會先用 ffmpeg 做靜音剪,避免 Whisper 對靜音產生幻覺。本機 whisper-server 用 repo 附的腳本裝:</p>
+				<pre><code># Linux:從源碼編,自動偵測 GPU/CPU
+sudo apt install build-essential cmake ffmpeg   # GPU 另加 nvidia-cuda-toolkit
+bash scripts/setup-whisper-linux.sh
+bash whisper/run-whisper.sh                      # 啟動在 127.0.0.1:8089
+
+# Windows:抓預編譯 zip(GPU 的 cuBLAS 版自帶 CUDA runtime)
+powershell -ExecutionPolicy Bypass -File scripts\setup-whisper-windows.ps1
+powershell -ExecutionPolicy Bypass -File whisper\run-whisper.ps1</code></pre>
+				<p>然後設定 → 自訂 → 本機 whisper,網址填 <code>http://127.0.0.1:8089/inference</code>(留空會自動偵測 <code>~/.mori/whisper-server.json</code>)。</p>
+				<h3>本機模式的老實話</h3>
+				<p>「完全不出網」目前的做法是:STT 選「自訂 · 本機」+ AI 走本機 Ollama,再開設定頁的 local-only 切換。但要知道現況限制 —— 這個切換存在 server 記憶體,<b>重啟會還原</b>;<code>LLM_LOCAL_ONLY</code> 環境變數的支援(開機鎖死、涵蓋 STT 與 BYO 繞道)還沒實作,進度看 <a href="https://github.com/yazelin/mori-canvas/issues/17" target="_blank" rel="noreferrer">issue #17</a>。在那之前,對資料敏感的場合請自己確認設定沒被改回雲端。</p>
+			</div>
+		</section>
+
+		<section id="prompts">
+			<div class="wrap">
+				<h2><span class="num">六</span>提示詞客製</h2>
+				<p>AI 的行為全部寫在 <code>prompts/*.md</code>,不用碰 Rust:<code>board-agent.md</code>(畫卡 agent)、<code>transcript-cleanup.md</code>(stage-1 清稿)、<code>summary.md</code>(白板摘要)、<code>card-edit.md</code>、<code>common.md</code>。</p>
+				<p>搜尋順序:<code>$MORI_CANVAS_PROMPTS</code> → 執行目錄的 <code>./prompts</code> → <code>~/.mori/mori-canvas/prompts</code>,都沒有就用內嵌在 binary 裡的預設(所以單獨一顆 binary 也能跑)。覆寫目錄<b>每次請求重讀</b> —— 改存 <code>.md</code>,下一個 request 就生效,不用重編、不用重啟。</p>
+				<p>提示詞可用 <code>{{include:NAME}}</code> 一行引入另一份 <code>NAME.md</code>(一層),<code>&lt;!-- --&gt;</code> 註解會在載入時剝掉,可以放編輯備註。想調 AI 的口味,從這裡下手最便宜。</p>
+			</div>
+		</section>
+
+		<footer><div class="wrap">MIT 授權 · 用 Rust + React 自架的會議白板<div class="links"><a href="https://github.com/yazelin/mori-canvas" target="_blank" rel="noreferrer">GitHub</a><a href="https://mori-canvas.onrender.com/" target="_blank" rel="noreferrer">試玩</a><a href="faq.html">FAQ</a></div></div></footer>
+	</body>
+</html>

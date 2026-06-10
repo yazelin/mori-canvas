@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="zh-TW">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>範例教學 — Mori Canvas 共筆白板</title>
+		<meta name="description" content="Mori Canvas 五個 persona 範例教學:會議記錄、工程人、產品經理、行銷人、顧問分析師。先看成品,再照著講,白板就長出同款。範例可在 app 內一鍵載入,五個範例剛好涵蓋全部十種板型。" />
+		<meta name="theme-color" content="#faf7f1" />
+		<meta property="og:title" content="範例教學 — Mori Canvas 共筆白板" />
+		<meta property="og:description" content="五個角色、五張現成的板。看見成品,照著講,白板就長出同款。" />
+		<meta property="og:image" content="https://mori-canvas.onrender.com/og.png" />
+		<meta property="og:image:width" content="1200" />
+		<meta property="og:image:height" content="630" />
+		<meta name="twitter:card" content="summary_large_image" />
+		<meta name="twitter:image" content="https://mori-canvas.onrender.com/og.png" />
+		<link rel="preconnect" href="https://fonts.googleapis.com" />
+		<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+		<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet" />
+		<link rel="stylesheet" href="site.css" />
+		<style>
+			/* 頁內微調:板型一行(名稱 + 顏色語意點點) */
+			.boardline { margin: 10px 0 2px; }
+			.boardline b { margin-right: 10px; }
+		</style>
+	</head>
+	<body>
+		<nav class="topnav"><div class="nav-inner"><a class="brand" href="./">Mori Canvas</a><div class="links"><a href="./">首頁</a><a href="guide.html">操作手冊</a><a class="on" href="examples.html">範例教學</a><a href="selfhost.html">自架部署</a><a href="faq.html">常見問題</a><a class="try" href="https://mori-canvas.onrender.com/" target="_blank" rel="noreferrer">立即試玩</a></div></div></nav>
+
+		<header class="page">
+			<div class="wrap">
+				<h1>範例教學</h1>
+				<p class="lead">五個角色、五張現成的板。先看成品長什麼樣,再照「講法示範」講,你的板就長出同款。</p>
+			</div>
+		</header>
+
+		<section>
+			<div class="wrap">
+				<h2>範例怎麼用</h2>
+				<p>兩條路,挑一條:</p>
+				<ol class="steps">
+					<li><b>一鍵載入</b>:打開 <a href="https://mori-canvas.onrender.com/" target="_blank" rel="noreferrer">線上 app</a>,按右上的「<b>範例</b>」按鈕(空白板上也有載入範例的提示),挑一個角色,整張板直接長好。載入後就是一張普通的板,可以接著拖拉、改字、繼續講。</li>
+					<li><b>自己講出來</b>:開一張空白板,按「開始會議記錄」,照下面每節的「照著講就長出來」唸。AI 會先把你的話清稿(贅字、斷錯句不會被抄進卡片),再整理成卡片和連線。</li>
+				</ol>
+				<p>初次進入會有引導和 6 步互動導覽,跟著走一遍最快;之後想重看,點右上的「?」就能重開。</p>
+				<figure class="demo-video">
+					<video controls preload="metadata" playsinline src="videos/transcript-to-board.mp4"></video>
+					<figcaption>
+						<h3>逐字稿生圖</h3>
+						<p>把現成逐字稿丟給 agent,AI 自動整理成卡片、連線與圖框 —— 用講的也是同一條路。</p>
+					</figcaption>
+				</figure>
+				<p>五個範例各用兩種板型,加起來剛好把<b>十種板型</b>全走過一遍。每種板型的顏色語意不同,各節會講清楚。</p>
+				<div class="toc">
+					<a href="#meeting">會議記錄 · 客戶需求會議</a>
+					<a href="#engineer">工程人 · 系統設計討論</a>
+					<a href="#pm">產品經理 · Sprint 規劃</a>
+					<a href="#marketing">行銷人 · 新產品上市計畫</a>
+					<a href="#consultant">顧問/分析師 · 問題拆解</a>
+					<a href="#types">十種板型總表</a>
+				</div>
+			</div>
+		</section>
+
+		<section id="meeting">
+			<div class="wrap">
+				<h2>會議記錄 · 客戶需求會議</h2>
+				<p>需求訪談時即時整理主題、待辦、決議與風險,並排出專案分工架構。範例場景是診所預約系統的需求會議。</p>
+				<img class="shot" src="shots/example-meeting.png" alt="會議記錄範例:診所預約系統需求會議白板與專案分工組織架構圖" />
+				<h3>用到的板型</h3>
+				<div class="boardline kinds"><b>會議白板</b><span class="kind"><span class="dot" style="background:var(--yellow)"></span>主題</span><span class="kind"><span class="dot" style="background:var(--green)"></span>待辦</span><span class="kind"><span class="dot" style="background:var(--blue)"></span>決議</span><span class="kind"><span class="dot" style="background:var(--red)"></span>風險</span></div>
+				<div class="boardline kinds"><b>組織架構圖</b><span class="kind"><span class="dot" style="background:var(--blue)"></span>最高層</span><span class="kind"><span class="dot" style="background:var(--green)"></span>主管/部門</span><span class="kind"><span class="dot" style="background:var(--yellow)"></span>基層職位</span><span class="kind"><span class="dot" style="background:var(--red)"></span>外部/兼任</span></div>
+				<p>會議白板那張:「LINE 預約整合」是黃色主題卡,「整理現有掛號流程」是綠色待辦、掛著負責人美玲,「首版只做預約掛號」是藍色決議,「HIS 廠商配合度低」是紅色風險、還連到健保卡介接那張。組織架構那張:專案負責人志明在最高層(藍),底下三個組(綠),組員是黃,HIS 廠商窗口是外部(紅)。</p>
+				<h3>照著講就長出來</h3>
+				<div class="utter"><span class="who">你說</span>「這次主題是 LINE 預約整合,先幫我開一張主題卡。」</div>
+				<div class="utter"><span class="who">你說</span>「請美玲下週前整理現有掛號流程,幫我記成一張待辦。」</div>
+				<div class="utter"><span class="who">你說</span>「大家決議首版只做預約掛號,其他功能下一期再討論。」</div>
+				<div class="utter"><span class="who">你說</span>「HIS 廠商配合度是個風險,標紅色然後連到健保卡介接那張。」</div>
+				<p>適合需求訪談、客戶會議,還有任何「散會時想直接拿到待辦和決議」的場合。</p>
+			</div>
+		</section>
+
+		<section id="engineer">
+			<div class="wrap">
+				<h2>工程人 · 系統設計討論</h2>
+				<p>把口頭討論的系統分層畫成架構圖,再補一條含判斷分支的預約流程。</p>
+				<img class="shot" src="shots/example-engineer.png" alt="工程人範例:預約系統架構圖與 LINE 預約流程圖" />
+				<h3>用到的板型</h3>
+				<div class="boardline kinds"><b>系統架構圖</b><span class="kind"><span class="dot" style="background:var(--blue)"></span>前端/介面</span><span class="kind"><span class="dot" style="background:var(--green)"></span>後端/服務</span><span class="kind"><span class="dot" style="background:var(--yellow)"></span>資料/儲存</span><span class="kind"><span class="dot" style="background:var(--red)"></span>外部系統</span></div>
+				<div class="boardline kinds"><b>流程圖</b><span class="kind"><span class="dot" style="background:var(--green)"></span>開始</span><span class="kind"><span class="dot" style="background:var(--yellow)"></span>步驟</span><span class="kind"><span class="dot" style="background:var(--blue)"></span>判斷/分支</span><span class="kind"><span class="dot" style="background:var(--red)"></span>結束/例外</span></div>
+				<p>架構圖那張:LINE LIFF 頁面、診所後台是前端(藍),API 閘道、預約服務、通知服務是後端(綠),PostgreSQL、Redis 是資料層(黃),LINE 訊息 API 和 HIS 掛號系統是外部系統(紅);箭頭是「誰呼叫誰」。流程圖那張:「使用者點預約」開始(綠),選科別、選時段是步驟(黃),「時段尚有名額?」是判斷(藍),從它岔出兩條 —— 有名額就寫入,沒名額走「提示改選時段」的例外(紅)。</p>
+				<h3>照著講就長出來</h3>
+				<div class="utter"><span class="who">你說</span>「前端有 LINE LIFF 頁面跟診所後台,都打到 API 閘道。」</div>
+				<div class="utter"><span class="who">你說</span>「預約服務要讀 PostgreSQL,也會用到 Redis 快取。」</div>
+				<div class="utter"><span class="who">你說</span>「通知服務最後會呼叫 LINE 訊息 API 把結果發給使用者。」</div>
+				<div class="utter"><span class="who">你說</span>「流程加一個判斷:時段沒名額就走例外,提示改選時段。」</div>
+				<p>適合系統設計討論、架構 review —— 邊講邊畫,散會時架構圖已經在那裡。</p>
+			</div>
+		</section>
+
+		<section id="pm">
+			<div class="wrap">
+				<h2>產品經理 · Sprint 規劃</h2>
+				<p>用看板追 Sprint 任務狀態,再把 Q3 里程碑串成有負責人的依賴鏈。</p>
+				<img class="shot" src="shots/example-pm.png" alt="產品經理範例:Sprint 14 看板與 Q3 里程碑甘特圖" />
+				<h3>用到的板型</h3>
+				<div class="boardline kinds"><b>看板 Kanban</b><span class="kind"><span class="dot" style="background:var(--red)"></span>待辦</span><span class="kind"><span class="dot" style="background:var(--yellow)"></span>進行中</span><span class="kind"><span class="dot" style="background:var(--green)"></span>已完成</span><span class="kind"><span class="dot" style="background:var(--blue)"></span>阻塞/擱置</span></div>
+				<div class="boardline kinds"><b>甘特圖</b><span class="kind"><span class="dot" style="background:var(--green)"></span>已完成</span><span class="kind"><span class="dot" style="background:var(--yellow)"></span>進行中</span><span class="kind"><span class="dot" style="background:var(--blue)"></span>未開始</span><span class="kind"><span class="dot" style="background:var(--red)"></span>延遲/卡關</span></div>
+				<p>看板那張:「金流串接測試」是黃色進行中、負責人志明、掛 #金流 標籤;「發票 API 等廠商」是藍色阻塞;「首頁改版上線」這類綠色是已完成。甘特那張:UI 設計定稿(雅婷)綠色已完成,核心功能開發黃色進行中,「金流介接」紅色延遲,後面的整合測試、正式上線、上線後監控照依賴鏈連起來,每張卡都有負責人。</p>
+				<h3>照著講就長出來</h3>
+				<div class="utter"><span class="who">你說</span>「金流串接測試進行中,負責人是志明,幫他加金流標籤。」</div>
+				<div class="utter"><span class="who">你說</span>「發票 API 還在等廠商回覆,這張先移到阻塞那一欄。」</div>
+				<div class="utter"><span class="who">你說</span>「甘特圖上 UI 設計定稿標已完成,那是雅婷負責的。」</div>
+				<div class="utter"><span class="who">你說</span>「金流介接延遲了標紅色,後面的整合測試跟正式上線照鏈排。」</div>
+				<p>適合 sprint 規劃和每日站會 —— 講狀態就是更新狀態,卡片自己換欄。</p>
+			</div>
+		</section>
+
+		<section id="marketing">
+			<div class="wrap">
+				<h2>行銷人 · 新產品上市計畫</h2>
+				<p>以手沖咖啡訂閱盒為例,邊開會邊長出 SWOT 四象限與上市時間軸。</p>
+				<img class="shot" src="shots/example-marketing.png" alt="行銷人範例:新品上市 SWOT 四象限與上市時程時間軸" />
+				<h3>用到的板型</h3>
+				<div class="boardline kinds"><b>SWOT 分析</b><span class="kind"><span class="dot" style="background:var(--green)"></span>優勢 S</span><span class="kind"><span class="dot" style="background:var(--yellow)"></span>劣勢 W</span><span class="kind"><span class="dot" style="background:var(--blue)"></span>機會 O</span><span class="kind"><span class="dot" style="background:var(--red)"></span>威脅 T</span></div>
+				<div class="boardline kinds"><b>時間軸</b><span class="kind"><span class="dot" style="background:var(--green)"></span>已完成</span><span class="kind"><span class="dot" style="background:var(--yellow)"></span>進行中</span><span class="kind"><span class="dot" style="background:var(--blue)"></span>規劃中</span><span class="kind"><span class="dot" style="background:var(--red)"></span>延遲/風險</span></div>
+				<p>SWOT 那張:「IG 私域流量強」落在綠色優勢象限,「訂閱金流未串接」「人手只有三人」是黃色劣勢,「宅家手沖風潮升溫」是藍色機會,「超商咖啡訂閱競品」是紅色威脅 —— 講到哪個象限,卡片就排進哪格。時間軸那張:豆單定案、試喝盒公測已完成(綠),訂閱頁面開發進行中(黃),「包裝印刷延誤」紅色,KOL 開箱、正式上市、首月留存檢討是規劃中(藍),依時間先後串成一條線。</p>
+				<h3>照著講就長出來</h3>
+				<div class="utter"><span class="who">你說</span>「優勢先記 IG 私域流量強,再補一張自家烘豆成本低。」</div>
+				<div class="utter"><span class="who">你說</span>「劣勢是訂閱金流還沒串接,而且人手只有三個人。」</div>
+				<div class="utter"><span class="who">你說</span>「機會放宅家手沖風潮升溫,還有企業禮盒詢問變多。」</div>
+				<div class="utter"><span class="who">你說</span>「時程上包裝印刷延誤標紅色,排在訂閱頁面開發後面。」</div>
+				<p>適合上市規劃、行銷腦力激盪 —— 想法一句句丟,象限和時程同時成形。</p>
+			</div>
+		</section>
+
+		<section id="consultant">
+			<div class="wrap">
+				<h2>顧問/分析師 · 問題拆解</h2>
+				<p>用心智圖拆展店評估面向,再用魚骨圖追來客數下滑的根因。</p>
+				<img class="shot" src="shots/example-consultant.png" alt="顧問分析師範例:展店評估心智圖與來客數下滑魚骨圖" />
+				<h3>用到的板型</h3>
+				<div class="boardline kinds"><b>心智圖</b><span class="kind"><span class="dot" style="background:var(--blue)"></span>中心</span><span class="kind"><span class="dot" style="background:var(--green)"></span>主幹</span><span class="kind"><span class="dot" style="background:var(--yellow)"></span>分支</span><span class="kind"><span class="dot" style="background:var(--red)"></span>細節</span></div>
+				<div class="boardline kinds"><b>魚骨圖</b><span class="kind"><span class="dot" style="background:var(--blue)"></span>問題/結果</span><span class="kind"><span class="dot" style="background:var(--green)"></span>主因分類</span><span class="kind"><span class="dot" style="background:var(--yellow)"></span>次要原因</span><span class="kind"><span class="dot" style="background:var(--red)"></span>關鍵因素</span></div>
+				<p>心智圖那張:中心是藍色的「二號店展店評估」,往外發散地點商圈、財務資金、人力營運、品牌行銷四條綠色主幹,每條主幹再長出黃色分支(捷運站週邊人流、回本期試算、店長人選培訓……)。魚骨那張:魚頭是藍色的「來客數下滑三成」,商品、服務、環境、行銷四類主因是綠色魚骨,各自掛黃色次要原因;「隔壁新開競品店」標紅色關鍵因素,接在環境因素那條骨上。</p>
+				<h3>照著講就長出來</h3>
+				<div class="utter"><span class="who">你說</span>「中心放二號店展店評估,先拉地點商圈跟財務資金兩條主幹。」</div>
+				<div class="utter"><span class="who">你說</span>「地點商圈下面補捷運站週邊人流和租金行情比較兩張。」</div>
+				<div class="utter"><span class="who">你說</span>「魚骨圖的問題是來客數下滑三成,主因先分商品服務環境行銷四類。」</div>
+				<div class="utter"><span class="who">你說</span>「隔壁新開競品店是關鍵因素,標紅色接到環境因素那條骨。」</div>
+				<p>適合問題拆解和根因分析 workshop —— 你負責問對問題,結構 Mori 來畫。</p>
+			</div>
+		</section>
+
+		<section id="types">
+			<div class="wrap">
+				<h2>十種板型總表</h2>
+				<p>工具列徽章可以手動切板型;AI 聽到對應的內容、切到新主題時,也會自動開對應的圖。同一張畫布可以同時有好幾張圖,排版引擎保證卡片和圖框不互疊。</p>
+				<table>
+					<tr><th>板型</th><th>講什麼會長出它</th><th>顏色語意</th></tr>
+					<tr><td>會議白板</td><td>一般會議內容:主題、待辦、決議、風險</td><td>黃=主題 · 綠=待辦 · 藍=決議 · 紅=風險</td></tr>
+					<tr><td>組織架構圖</td><td>分工與隸屬:「負責人是誰、下面分幾組」</td><td>藍=最高層 · 綠=主管/部門 · 黃=基層職位 · 紅=外部/兼任</td></tr>
+					<tr><td>流程圖</td><td>步驟先後與判斷:「先…再…,沒名額就走例外」</td><td>綠=開始 · 黃=步驟 · 藍=判斷/分支 · 紅=結束/例外</td></tr>
+					<tr><td>系統架構圖</td><td>系統元件與呼叫:「前端打到 API,服務讀資料庫」</td><td>藍=前端/介面 · 綠=後端/服務 · 黃=資料/儲存 · 紅=外部系統</td></tr>
+					<tr><td>心智圖</td><td>拆主題面向:「中心放…,拉幾條主幹」</td><td>藍=中心 · 綠=主幹 · 黃=分支 · 紅=細節</td></tr>
+					<tr><td>看板 Kanban</td><td>任務狀態:「進行中、完成了、被卡住」</td><td>紅=待辦 · 黃=進行中 · 綠=已完成 · 藍=阻塞/擱置</td></tr>
+					<tr><td>SWOT</td><td>優勢、劣勢、機會、威脅四象限分析</td><td>綠=優勢 S · 黃=劣勢 W · 藍=機會 O · 紅=威脅 T</td></tr>
+					<tr><td>時間軸</td><td>里程碑與時程先後:「…排在…後面」</td><td>綠=已完成 · 黃=進行中 · 藍=規劃中 · 紅=延遲/風險</td></tr>
+					<tr><td>魚骨圖</td><td>追根因:「問題是…,主因分幾類」</td><td>藍=問題/結果 · 綠=主因分類 · 黃=次要原因 · 紅=關鍵因素</td></tr>
+					<tr><td>甘特圖</td><td>任務鏈與負責人:「照鏈排、誰負責」</td><td>綠=已完成 · 黃=進行中 · 藍=未開始 · 紅=延遲/卡關</td></tr>
+				</table>
+				<p>看完成品,輪到你講了。開一張板,挑一個最像你下一場會議的範例,照著講。</p>
+				<div class="cta">
+					<a class="btn primary" href="https://mori-canvas.onrender.com/" target="_blank" rel="noreferrer">立即試玩</a>
+					<a class="btn" href="guide.html">看操作手冊</a>
+				</div>
+				<p style="font-size:13.5px;color:var(--soft);text-align:center;margin-top:14px;">試玩站跑在 Render 免費方案,閒置 15 分鐘會休眠 —— 第一個進來的人要等 30–60 秒冷啟動,之後就正常。</p>
+			</div>
+		</section>
+
+		<footer><div class="wrap">MIT 授權 · 用 Rust + React 自架的會議白板<div class="links"><a href="https://github.com/yazelin/mori-canvas" target="_blank" rel="noreferrer">GitHub</a><a href="https://mori-canvas.onrender.com/" target="_blank" rel="noreferrer">試玩</a><a href="faq.html">FAQ</a></div></div></footer>
+	</body>
+</html>
