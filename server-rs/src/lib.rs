@@ -1,6 +1,7 @@
 mod agent;
 mod apply;
 mod board_types;
+mod cleanup;
 mod layout;
 mod llm;
 mod prompts;
@@ -485,7 +486,7 @@ fn summary_board_input_from_parts(
     (title, input)
 }
 
-fn strip_think(s: &str) -> String {
+pub(crate) fn strip_think(s: &str) -> String {
     let mut out = s.to_string();
     while let (Some(a), Some(b)) = (out.find("<think>"), out.find("</think>")) {
         if b > a {
@@ -828,6 +829,18 @@ pub async fn serve(port: u16) {
                     .collect();
                 let room = sync::get_or_create_room(&rooms, &name).await;
                 let s = SETTINGS.lock().await.clone();
+                // stage-1 清稿(可帶 "cleanup": false 跳過):贅字/斷句先處理掉,別讓它進卡片
+                let do_cleanup = body.get("cleanup").and_then(|v| v.as_bool()).unwrap_or(true);
+                let (transcript, cleaned) = if do_cleanup {
+                    cleanup::cleanup_transcript(&transcript, s.local_only, &llm).await
+                } else {
+                    (transcript, false)
+                };
+                if transcript.trim().is_empty() {
+                    return Ok(warp::reply::json(
+                        &json!({ "ok": true, "stickies": 0, "connectors": 0, "added": [], "skipped": "整段都是語助詞" }),
+                    ));
+                }
                 let _lk = room_lock(&name).await;
                 let _guard = _lk.lock().await; // serialize agent turns (per-room race guard)
                 let res = apply::run_agent_turn(
@@ -841,7 +854,10 @@ pub async fn serve(port: u16) {
                 )
                 .await;
                 Ok(match res {
-                    Ok(v) => warp::reply::json(&v),
+                    Ok(mut v) => {
+                        v["cleaned"] = json!(cleaned);
+                        warp::reply::json(&v)
+                    }
                     Err(e) => warp::reply::json(&json!({ "ok": false, "error": e })),
                 })
             },
@@ -912,6 +928,15 @@ pub async fn serve(port: u16) {
                         &json!({ "ok": true, "transcript": "", "stickies": 0 }),
                     ));
                 }
+                // stage-1 清稿:語音逐字稿先清贅字/重斷句,卡片才不會抄進「嗯/那個/對對對」
+                let raw_transcript = transcript.clone();
+                let (transcript, cleaned) =
+                    cleanup::cleanup_transcript(&transcript, s.local_only, &llm).await;
+                if transcript.trim().is_empty() {
+                    return Ok(warp::reply::json(
+                        &json!({ "ok": true, "transcript": "", "rawTranscript": raw_transcript, "stickies": 0, "skipped": "整段都是語助詞" }),
+                    ));
+                }
                 let by: String = q
                     .get("by")
                     .map(|s| s.as_str())
@@ -937,6 +962,8 @@ pub async fn serve(port: u16) {
                     Err(e) => json!({ "ok": false, "error": e }),
                 };
                 res["transcript"] = json!(transcript);
+                res["rawTranscript"] = json!(raw_transcript);
+                res["cleaned"] = json!(cleaned);
                 Ok(warp::reply::json(&res))
             },
         );
@@ -1017,6 +1044,13 @@ pub async fn serve(port: u16) {
             let s = SETTINGS.lock().await.clone();
             let _lk = room_lock(&name).await;
             let _guard = _lk.lock().await; // serialize per-room
+            // stage-1 清稿:補回標點之後,下面 chunk_transcript 的句界切分才會準
+            let (transcript, _cleaned) =
+                if body.get("cleanup").and_then(|v| v.as_bool()).unwrap_or(true) {
+                    cleanup::cleanup_transcript(&transcript, s.local_only, &llm).await
+                } else {
+                    (transcript, false)
+                };
             let chunks = chunk_transcript(&transcript);
             let total = chunks.len();
             let mut turns = 0usize;

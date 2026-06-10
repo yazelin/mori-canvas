@@ -40,6 +40,7 @@ content 規則:
 - 每次最多 6 張。text 是精簡繁中短語,別超過 14 字。
 - connectors 用 from/to(從 0 起,分開兩個整數),把相關的卡接起來(組織/流程/架構圖務必接成完整的樹/鏈)。
 - owner / tags 沒有就省略,別亂猜。
+- 輸入是會議逐字稿,可能殘留口語贅字(嗯/那個/就是說/對對對)或辨識錯字:擷取「語意」寫成卡片,**絕不把贅字、語助詞、重複詞抄進卡片文字**;一張卡只承載一個重點,寧可少建卡也不建雜訊卡。
 - 既有卡被推翻/完成/講錯才動:updates [{index,text,kind}]、deletes [index]。再次提醒:要『改既有卡』就用 updates 或 command,別重複建一張。
 
 範例:「幫我排一下」→ {"intent":"command","command":{"action":"tidy"}};「把定價那張改成季繳方案」→ {"intent":"command","command":{"action":"edit","index":<定價那張的索引>,"text":"季繳方案"}};「庫存那張討論完了移到已討論」→ {"intent":"command","command":{"action":"move","index":<庫存那張>,"frame":<已討論圖框索引>}};空白板講內容 → {"intent":"content","frame":{"new":{"type":"meeting","title":""}},"stickies":[{"text":"線上預約系統","color":"yellow"}],"connectors":[]};已經有一張會議板、又講了新內容 → {"intent":"content","frame":0,"stickies":[{"text":"新的重點","color":"yellow"}],"connectors":[]}
