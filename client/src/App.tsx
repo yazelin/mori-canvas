@@ -75,6 +75,22 @@ const WB_TYPES: { key: string; label: string; blurb: string }[] = [
 	{ key: 'gantt', label: '甘特圖 / 排程', blurb: '任務排程,列=負責人,左→右時間' },
 ]
 const typeLabel = (k: string) => WB_TYPES.find((t) => t.key === k)?.label || '白板'
+// 錄音中的即時音量條:自己輪詢 ref,只重繪這個小元件
+function VolBars({ level }: { level: React.MutableRefObject<number> }) {
+	const [v, setV] = useState(0)
+	useEffect(() => {
+		const t = setInterval(() => setV(level.current), 150)
+		return () => clearInterval(t)
+	}, [level])
+	const n = Math.min(5, Math.ceil(v * 90)) // SPEAK 門檻 0.018 約亮 2 格
+	return (
+		<span style={{ display: 'inline-flex', gap: 2, alignItems: 'flex-end', height: 14, marginLeft: 9 }} title="即時音量">
+			{[0, 1, 2, 3, 4].map((i) => (
+				<span key={i} style={{ width: 3, height: 4 + i * 2.5, borderRadius: 1, background: i < n ? 'currentColor' : 'rgba(127,127,127,0.35)' }} />
+			))}
+		</span>
+	)
+}
 // 互動導覽步驟:sel 選不到的步驟會自動略過(例如手機版沒有桌面匯出鈕)
 const TOUR_STEPS: { sel: string; title: string; body: string }[] = [
 	{ sel: '[data-tour="record"]', title: '用講的就好', body: '按這顆開始會議記錄:正常講話,停頓一下,AI 就把那段重點整理成便利貼上板。錄音中也能直接下指令,像「幫我排一下」「把這張指給小明」。' },
@@ -885,7 +901,7 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 		try {
 			stream = await navigator.mediaDevices.getUserMedia({ audio: true })
 		} catch (e) {
-			setBusy(`麥克風錯誤:${(e as any)?.name || (e as Error).message}`)
+			setBusy(micErrorMsg(e))
 			return
 		}
 		const chunks: BlobPart[] = []
@@ -926,26 +942,109 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 	// continuous "meeting" mode: keep listening, auto-cut a segment on each pause
 	// (silence) and send it for transcription+agent, so cards appear hands-free.
 	const [meeting, setMeeting] = useState(false)
-	const [segCount, setSegCount] = useState(0)
+	const [segCount, setSegCount] = useState(0) // 誠實計數:只算「成功上板」的段
 	const meetingRef = useRef<{ stop: () => void } | null>(null)
+	// 語音段落絕不無聲丟失:送出中/失敗都看得到,失敗的 blob 留著可重送
+	const [pendingSegs, setPendingSegs] = useState(0)
+	const [failedSegs, setFailedSegs] = useState<number[]>([])
+	const failedBlobs = useRef(new Map<number, Blob>())
+	const segSeq = useRef(0)
+	const pausedUntil = useRef(0) // 被 demo 限流時暫停送出(epoch ms)
+	const pauseTimer = useRef<any>(null)
+	const sendQueue = useRef<{ id: number; blob: Blob }[]>([])
+	const meterRef = useRef(0) // 即時 RMS,給 VolBars 輪詢(避免 120ms setState 重繪整個 App)
 
-	function sendSegment(blob: Blob) {
+	function micErrorMsg(e: any): string {
+		const n = e?.name || ''
+		if (n === 'NotAllowedError' || n === 'PermissionDeniedError')
+			return '麥克風權限被拒 — 點網址列左邊的鎖頭(或麥克風圖示)改成「允許」,再試一次'
+		if (n === 'NotFoundError' || n === 'DevicesNotFoundError')
+			return '找不到麥克風 — 檢查系統有沒有麥克風、瀏覽器是否選對輸入裝置'
+		if (n === 'NotReadableError' || n === 'TrackStartError')
+			return '麥克風被其他程式佔用 — 關掉其他正在用麥克風的軟體再試'
+		return `麥克風錯誤:${n || e?.message || e}`
+	}
+
+	function queueSegment(blob: Blob) {
 		if (!blob.size) return
+		const id = ++segSeq.current
+		if (Date.now() < pausedUntil.current) {
+			sendQueue.current.push({ id, blob })
+			setPendingSegs((n) => n + 1)
+			return
+		}
+		void sendSegment(id, blob, 0)
+	}
+	function failSeg(id: number, blob: Blob, why: string) {
+		failedBlobs.current.set(id, blob)
+		setFailedSegs((a) => (a.includes(id) ? a : [...a, id]))
+		setBusy(`有一段沒送出(${why})— 按「重送」補回,內容沒丟`)
+	}
+	// 限流暫停:倒數結束自動把佇列裡的段依序補送(間隔 1.2s,避免又撞限流)
+	function schedulePauseResume(wait: number) {
+		clearTimeout(pauseTimer.current)
+		setBusy(`demo 限流 — 錄音照常,${wait} 秒後自動續傳`)
+		pauseTimer.current = setTimeout(async () => {
+			const q = sendQueue.current.splice(0)
+			setPendingSegs((n) => Math.max(0, n - q.length))
+			for (const s of q) {
+				await sendSegment(s.id, s.blob, 0)
+				await new Promise((r) => setTimeout(r, 1200))
+			}
+		}, wait * 1000)
+	}
+	async function sendSegment(id: number, blob: Blob, attempt: number): Promise<void> {
 		const type = blob.type || 'audio/webm'
 		const ext = type.includes('mp4') ? 'mp4' : type.includes('ogg') ? 'ogg' : 'webm'
-		setSegCount((c) => c + 1)
-		fetch(`${SYNC_HTTP}/api/voice/${encodeURIComponent(room)}?ext=${ext}&by=${encodeURIComponent(me.name)}`, {
-			method: 'POST',
-			headers: { 'Content-Type': type, ...byoHeaders() },
-			body: blob,
-		})
-			.then((x) => x.json())
-			.then((r) => {
-				showSubtitle(r.transcript) // UX: let the speaker see what was heard
-				logTranscript(r.transcript) // keep the word-for-word meeting log
-				applyAgentResponse(r) // a segment may be a spoken command, not content
+		setPendingSegs((n) => n + 1)
+		try {
+			const res = await fetch(`${SYNC_HTTP}/api/voice/${encodeURIComponent(room)}?ext=${ext}&by=${encodeURIComponent(me.name)}`, {
+				method: 'POST',
+				headers: { 'Content-Type': type, ...byoHeaders() },
+				body: blob,
 			})
-			.catch(() => {})
+			const r =
+				res.status === 429
+					? { ok: false, rateLimited: true, retryAfterSeconds: parseInt(res.headers.get('Retry-After') || '15', 10) || 15 }
+					: await res.json()
+			setPendingSegs((n) => Math.max(0, n - 1))
+			if (r.rateLimited) {
+				const wait = r.retryAfterSeconds || 15
+				pausedUntil.current = Date.now() + wait * 1000
+				sendQueue.current.push({ id, blob })
+				setPendingSegs((n) => n + 1)
+				schedulePauseResume(wait)
+				return
+			}
+			if (!r.ok) {
+				failSeg(id, blob, r.error || '伺服器錯誤')
+				return
+			}
+			setSegCount((c) => c + 1)
+			showSubtitle(r.transcript) // UX: let the speaker see what was heard
+			logTranscript(r.transcript) // keep the word-for-word meeting log
+			applyAgentResponse(r) // a segment may be a spoken command, not content
+		} catch {
+			setPendingSegs((n) => Math.max(0, n - 1))
+			if (attempt < 1) {
+				// 網路抖一下先自動重試一次
+				setTimeout(() => void sendSegment(id, blob, attempt + 1), 3000)
+			} else {
+				failSeg(id, blob, '網路中斷')
+			}
+		}
+	}
+	async function retryFailedSegs() {
+		const ids = [...failedSegs]
+		setFailedSegs([])
+		for (const id of ids) {
+			const blob = failedBlobs.current.get(id)
+			failedBlobs.current.delete(id)
+			if (blob) {
+				await sendSegment(id, blob, 1)
+				await new Promise((r) => setTimeout(r, 800))
+			}
+		}
 	}
 
 	async function startMeeting() {
@@ -957,7 +1056,7 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 		try {
 			stream = await navigator.mediaDevices.getUserMedia({ audio: true })
 		} catch (e) {
-			setBusy(`麥克風錯誤:${(e as any)?.name || (e as Error).message}`)
+			setBusy(micErrorMsg(e))
 			return
 		}
 		setMeeting(true)
@@ -974,6 +1073,7 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 		const SILENCE_MS = 1200 // pause length that ends a segment
 		const MIN_MS = 1500 // ignore ultra-short blips
 		const MAX_MS = 25000 // force a cut on long monologues
+		const NO_VOICE_WARN_MS = 9000 // 開錄這麼久都沒聲音 → 提醒檢查輸入裝置
 
 		let mr: MediaRecorder | null = null
 		let chunks: BlobPart[] = []
@@ -981,12 +1081,14 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 		let spoke = false
 		let silentSince = 0
 		let alive = true
+		let lastVoice = performance.now()
+		let warnedSilence = false
 
 		const startSeg = () => {
 			chunks = []
 			mr = new MediaRecorder(stream)
 			mr.ondataavailable = (ev) => ev.data.size && chunks.push(ev.data)
-			mr.onstop = () => sendSegment(new Blob(chunks, { type: mr?.mimeType || 'audio/webm' }))
+			mr.onstop = () => queueSegment(new Blob(chunks, { type: mr?.mimeType || 'audio/webm' }))
 			mr.start()
 			segStart = performance.now()
 			spoke = false
@@ -996,6 +1098,7 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 			try {
 				if (mr && mr.state !== 'inactive') mr.stop() // onstop sends this segment
 			} catch {}
+			setBusy('收到一段,辨識中…')
 			if (alive) startSeg()
 		}
 		const iv = setInterval(() => {
@@ -1007,12 +1110,19 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 				sum += v * v
 			}
 			const rms = Math.sqrt(sum / buf.length)
+			meterRef.current = rms // 即時音量,VolBars 自己輪詢,不經 React state
 			const now = performance.now()
 			if (rms > SPEAK) {
 				spoke = true
 				silentSince = 0
+				lastVoice = now
+				warnedSilence = false
 			} else if (spoke && !silentSince) {
 				silentSince = now
+			}
+			if (!warnedSilence && now - lastVoice > NO_VOICE_WARN_MS) {
+				warnedSilence = true
+				setBusy('聽不到聲音 — 檢查系統是否選對麥克風(部分筆電要選 Digital Mic 才收得到音)')
 			}
 			const dur = now - segStart
 			if ((spoke && silentSince && now - silentSince > SILENCE_MS && dur > MIN_MS) || (spoke && dur > MAX_MS)) cut()
@@ -1054,16 +1164,7 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 		try {
 			stream = await navigator.mediaDevices.getUserMedia({ audio: true })
 		} catch (e) {
-			const name = (e as any)?.name || ''
-			const hint =
-				name === 'NotAllowedError'
-					? '(你按了拒絕,或瀏覽器擋了 — 點網址列左邊圖示把麥克風設成允許)'
-					: name === 'NotFoundError'
-						? '(系統找不到麥克風裝置)'
-						: name === 'NotReadableError'
-							? '(麥克風被別的程式佔用)'
-							: ''
-			setBusy(`麥克風錯誤:${name || (e as Error).message} ${hint}`)
+			setBusy(micErrorMsg(e))
 			return
 		}
 		const chunks: BlobPart[] = []
@@ -2166,7 +2267,26 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 					onClick={() => (meeting ? stopMeeting() : startMeeting())}
 				>
 					<span className="rec-dot" />{meeting ? `錄音中 · 已整理 ${segCount} 段　點此停止` : '開始會議記錄'}
+					{meeting && <VolBars level={meterRef} />}
 				</button>
+				{(pendingSegs > 0 || failedSegs.length > 0) && (
+					<div style={{ display: 'flex', gap: 6, marginTop: 6, fontSize: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+						{pendingSegs > 0 && (
+							<span className="muted" style={{ border: '1px solid var(--line)', borderRadius: 999, padding: '2px 10px' }}>
+								處理中 {pendingSegs} 段…
+							</span>
+						)}
+						{failedSegs.length > 0 && (
+							<button
+								style={{ border: '1px solid var(--live)', color: 'var(--live)', background: 'transparent', borderRadius: 999, padding: '2px 10px', fontSize: 12, cursor: 'pointer' }}
+								title="這些段落的錄音還留著,點一下重新送出"
+								onClick={() => void retryFailedSegs()}
+							>
+								{failedSegs.length} 段沒送出 · 重送
+							</button>
+						)}
+					</div>
+				)}
 				{panelOpen && (
 					<>
 						<button
