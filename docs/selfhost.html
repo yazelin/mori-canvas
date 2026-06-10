@@ -4,7 +4,7 @@
 		<meta charset="UTF-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
 		<title>自架部署 — Mori Canvas 共筆白板</title>
-		<meta name="description" content="把 Mori Canvas 架在自己手上:單機 cargo build、GitHub Releases 預編譯包、Render 一鍵 Blueprint、環境變數總表、本機 whisper 與 Ollama、提示詞客製。全 MIT,資料自己管。" />
+		<meta name="description" content="把 Mori Canvas 架在自己手上:docker run 一行、install.sh 一鍵安裝、GitHub Releases 預編譯包、cargo build、Render 一鍵 Blueprint、systemd/nginx 範例、環境變數總表、本機 whisper 與 Ollama、提示詞客製。全 MIT,資料自己管。" />
 		<meta name="theme-color" content="#faf7f1" />
 		<meta property="og:title" content="自架部署 — Mori Canvas 共筆白板" />
 		<meta property="og:description" content="單機跑、區網 HTTPS、Render 一鍵部署、環境變數、本機模式與提示詞客製,一頁講完。" />
@@ -55,9 +55,20 @@
 					<tr><td>Ollama + qwen3</td><td>Groq 連不到時的本機 AI 後備;也是「全本機」的 AI 那條腿</td><td>選用</td></tr>
 					<tr><td>openssl</td><td>產自簽憑證給「公司區網版」HTTPS 用</td><td>區網多人才需要</td></tr>
 				</table>
-				<p>只想打字、貼逐字稿不用語音?那 Node + Rust + 一把 Groq key 就夠了。</p>
+				<p>只想打字、貼逐字稿不用語音?那一把 Groq key 就夠了(用 Docker 或預編譯包連 Node / Rust 都免)。</p>
 
-				<h3>從原始碼 build</h3>
+				<h3>最快:Docker 一行</h3>
+				<p>打 <code>v*</code> tag 時 CI 會把 image 發佈到 <code>ghcr.io/yazelin/mori-canvas</code>,一行起服務、資料掛 volume 持久化:</p>
+				<pre><code>docker run -p 1334:1334 -v "$PWD/data:/app/.data" -e GROQ_API_KEY=gsk_xxx ghcr.io/yazelin/mori-canvas</code></pre>
+				<p>開 <code>http://localhost:1334/</code> 就能用。白板資料在 <code>./data</code>;沒掛 volume 的話容器一刪就沒。</p>
+
+				<h3>Linux 一鍵安裝(install.sh)</h3>
+				<p>不想用 Docker、也不想裝 Rust / Node?一行抓 GitHub Releases 的預編譯 binary:</p>
+				<pre><code>curl -fsSL https://raw.githubusercontent.com/yazelin/mori-canvas/main/install.sh | bash
+mori-canvas-server      # 預設 http://0.0.0.0:1334</code></pre>
+				<p>裝到 <code>~/.local/share/mori-canvas/</code>、指令 symlink 在 <code>~/.local/bin/</code>,重跑同一行即升級;還沒有 release 或非 x86_64 機器時,腳本會印出「從源碼 build」的指引。</p>
+
+				<h3>從原始碼 build(備案)</h3>
 				<pre><code>git clone https://github.com/yazelin/mori-canvas &amp;&amp; cd mori-canvas
 npm install &amp;&amp; npm run build      # vite build(前端)→ cargo build --release(前端內嵌進 binary)
 ./server-rs/target/release/mori-canvas-server   # 預設 http://0.0.0.0:1334</code></pre>
@@ -73,10 +84,13 @@ npm install &amp;&amp; npm run build      # vite build(前端)→ cargo build --
 				</ol>
 				<p>注意:這個模式<b>沒有鑑權</b>,同 wifi 拿到網址的人就能進、會用到你的 Groq key。內網信任場合 OK,試完記得收(<code>kill $(lsof -ti tcp:5174)</code>);長期擺著建議放 nginx 反向代理後面。</p>
 
+				<h3>常駐(systemd)+ 正式 TLS(nginx)</h3>
+				<p>長期擺著用 repo 的 <a href="https://github.com/yazelin/mori-canvas/blob/main/deploy/mori-canvas.service" target="_blank" rel="noreferrer"><code>deploy/mori-canvas.service</code></a> + <a href="https://github.com/yazelin/mori-canvas/blob/main/deploy/nginx.conf.example" target="_blank" rel="noreferrer"><code>deploy/nginx.conf.example</code></a>:unit 指向 install.sh 裝好的 binary、env(<code>GROQ_API_KEY</code> / <code>PORT</code> / <code>BIND</code> ...)集中在 <code>/etc/mori-canvas.env</code>(範本 <code>deploy/mori-canvas.env.example</code>);nginx 終結 TLS,把頁面、<code>/api/</code>、<code>/sync/</code>(websocket upgrade)全 proxy 給 loopback 的 1334。照檔頭註解把 <code>USER</code> 換成實際使用者就能 <code>systemctl enable --now mori-canvas</code>。</p>
+
 				<h3>懶得 build?GitHub Releases 預編譯包</h3>
 				<p>打 <code>v*</code> tag 時 CI 會自動 build 兩種「下載即用」掛上 <a href="https://github.com/yazelin/mori-canvas/releases" target="_blank" rel="noreferrer">GitHub Releases</a>:</p>
 				<div class="cards">
-					<div class="card"><h4>server 包(tar.gz / zip)</h4><p><code>mori-canvas-server-v0.1.x-linux-x86_64.tar.gz</code> 與 <code>-windows-x86_64.zip</code>,內含單一 binary + 一頁 README.txt。解開、給一把 <code>GROQ_API_KEY</code>(環境變數或同資料夾 <code>.env</code>)、執行,開 <code>http://localhost:1334/</code>。多人開會用這個。</p></div>
+					<div class="card"><h4>server 包(tar.gz / zip)</h4><p><code>mori-canvas-server-v0.1.x-linux-x86_64.tar.gz</code>、<code>-macos-aarch64.tar.gz</code>(Apple Silicon;第一次先 <code>xattr -d com.apple.quarantine</code> 解 Gatekeeper 隔離)與 <code>-windows-x86_64.zip</code>,內含單一 binary + 一頁 README.txt。解開、給一把 <code>GROQ_API_KEY</code>(環境變數或同資料夾 <code>.env</code>)、執行,開 <code>http://localhost:1334/</code>。多人開會用這個。</p></div>
 					<div class="card"><h4>桌面 App(Tauri 安裝檔)</h4><p>Windows <code>.msi</code>/<code>.exe</code>、Linux <code>.AppImage</code>/<code>.deb</code>,雙擊安裝開原生視窗。桌面版是 loopback 單機(:8731);要多人一起開會,請用 server 版。本機自己 build:<code>npm run build &amp;&amp; npm run tauri</code>。</p></div>
 				</div>
 			</div>
