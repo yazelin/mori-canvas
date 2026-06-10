@@ -109,7 +109,8 @@ pub async fn cleanup_transcript(raw: &str, local_only: bool, opts: &llm::LlmOpts
     if scrubbed.chars().count() < 10 {
         return (scrubbed, false);
     }
-    let sys = crate::prompts::prompt("transcript-cleanup");
+    // lang=en:放寬語言規則、嚴禁翻譯 —— 清稿輸出保持講者原語言(見 EN_CLEANUP_DIRECTIVE)
+    let sys = llm::with_cleanup_lang(crate::prompts::prompt("transcript-cleanup"), opts.lang);
     let mut cleaned = String::new();
     for block in cleanup_blocks(&scrubbed) {
         let msgs = [

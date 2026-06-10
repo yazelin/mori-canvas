@@ -530,14 +530,18 @@ pub async fn plan_agent(
     } else {
         format!("\n\n剛才的會議逐字稿(脈絡,最新在最後;用來理解現在這句話在討論什麼,別把它當成新內容重複建卡):\n{}", context.join("\n"))
     };
-    let user = format!(
-        "使用者這段話(三引號內,可能是會議內容、也可能是給你的指令):\n\"\"\"\n{}\n\"\"\"{}{}{}{}{}",
-        transcript, ctx_block, topic_block, frames_block, ref_block, existing_block
+    let user = crate::llm::with_user_lang(
+        format!(
+            "使用者這段話(三引號內,可能是會議內容、也可能是給你的指令):\n\"\"\"\n{}\n\"\"\"{}{}{}{}{}",
+            transcript, ctx_block, topic_block, frames_block, ref_block, existing_block
+        ),
+        llm.lang,
     );
     let messages = vec![
         Msg {
             role: "system",
-            content: crate::prompts::prompt("board-agent"),
+            // lang=en 時在 system 尾端附加英文輸出指令(prompts/*.md 本體不動)
+            content: crate::llm::with_output_lang(crate::prompts::prompt("board-agent"), llm.lang),
         },
         Msg {
             role: "user",
@@ -556,7 +560,7 @@ pub async fn plan_card_edit(
     local_only: bool,
     llm: &LlmOpts,
 ) -> Result<CardEdit, String> {
-    let sys = crate::prompts::prompt("card-edit");
+    let sys = crate::llm::with_output_lang(crate::prompts::prompt("card-edit"), llm.lang);
     let mut meta = vec![format!("文字「{}」", text)];
     if let Some(o) = owner {
         meta.push(format!("負責人「{}」", o));

@@ -7,14 +7,67 @@ pub struct Msg {
     pub content: String,
 }
 
+/// AI 輸出語言(來自 client 的 X-Lang header 或 ?lang= query)。
+/// 預設 ZhTw —— 沒帶 header 的請求行為與改版前完全相同(零回歸)。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Lang {
+    #[default]
+    ZhTw,
+    En,
+}
+impl Lang {
+    /// "en" / "en-US" / "EN"(前綴比對、不分大小寫)=> En;其他(含 None / "zh-TW")=> ZhTw。
+    /// 注意不能用 byte slice 取前綴 —— header 值可能是任意 UTF-8,切在 char 邊界外會 panic。
+    pub fn parse(v: Option<&str>) -> Lang {
+        match v.map(|s| s.trim().to_ascii_lowercase()) {
+            Some(s) if s == "en" || s.starts_with("en-") => Lang::En,
+            _ => Lang::ZhTw,
+        }
+    }
+}
+
+/// lang=en 時附加在「生成型」system prompt(board-agent / card-edit / summary)尾端的
+/// 英文輸出指令。prompts/*.md 本體保持 zh 預設,不動檔案。
+pub const EN_OUTPUT_DIRECTIVE: &str = "\n\n[LANGUAGE OVERRIDE — HIGHEST PRIORITY] Ignore every Traditional-Chinese instruction above. EVERY output string MUST be in natural, concise English: every sticky \"text\", every frame \"title\", every tag, owner label and summary line. A Chinese sticky text is WRONG output. The surrounding instructions are in Chinese only because that is the default UI language — your output language is English. Keep proper nouns and people's names as they appear in the source.";
+/// lang=en 時也注入到 user message 開頭 —— system 尾端的指令容易被前面大量中文指示稀釋,
+/// user 訊息對「輸出語言」的權重更高,雙管齊下才壓得住 gpt-oss 的中文預設。
+pub const EN_USER_PREFIX: &str = "[Reply in English. All card text and titles must be English.]\n\n";
+/// 清稿(stage-1)是「整理逐字稿」不是生成:en 時只放寬語言規則、明確禁止翻譯,
+/// 逐字稿保留講者原語言(逐字記錄的忠實度;翻譯交給後面的 board-agent 輸出層)。
+pub const EN_CLEANUP_DIRECTIVE: &str = "\n\n[Language override] The transcript may be in English. Apply the same cleanup rules and reply in the SAME language the speaker used — do not translate. This overrides the Traditional Chinese rule above.";
+
+/// 生成型 prompt 的語言組裝(純函數供測試):zh 原樣;en 附加英文輸出指令。
+pub fn with_output_lang(system: String, lang: Lang) -> String {
+    match lang {
+        Lang::ZhTw => system,
+        Lang::En => system + EN_OUTPUT_DIRECTIVE,
+    }
+}
+/// user message 的語言前綴:zh 原樣;en 在最前面壓一行英文輸出指令。
+pub fn with_user_lang(user: String, lang: Lang) -> String {
+    match lang {
+        Lang::ZhTw => user,
+        Lang::En => format!("{}{}", EN_USER_PREFIX, user),
+    }
+}
+/// 清稿 prompt 的語言組裝(純函數供測試):zh 原樣;en 附加「同語言、不翻譯」指令。
+pub fn with_cleanup_lang(system: String, lang: Lang) -> String {
+    match lang {
+        Lang::ZhTw => system,
+        Lang::En => system + EN_CLEANUP_DIRECTIVE,
+    }
+}
+
 /// optional visitor-supplied "bring your own AI" — any OpenAI-compatible endpoint
 /// (OpenAI / Groq / Azure / Gemini-compat / OpenRouter / Ollama). When base+key+model
 /// are all set, the request uses these instead of the host's Groq, so the visitor pays.
+/// `lang` rides along so every LLM stage sees the requested output language.
 #[derive(Default, Clone)]
 pub struct LlmOpts {
     pub base: Option<String>,
     pub key: Option<String>,
     pub model: Option<String>,
+    pub lang: Lang,
 }
 impl LlmOpts {
     fn custom(&self) -> Option<(&str, &str, &str)> {
@@ -259,8 +312,18 @@ pub fn to_traditional(text: &str) -> String {
     }
 }
 
+/// 輸出後處理(純函數供測試):zh 過 OpenCC 繁化(LLM 不可信任,硬轉);
+/// en 跳過 —— 英文沒有簡繁問題,過 opencc 雖無害但語意上不該過。
+pub fn localize_output(text: String, lang: Lang) -> String {
+    match lang {
+        Lang::ZhTw => to_traditional(&text),
+        Lang::En => text,
+    }
+}
+
 /// Visitor's own AI (if configured) > Groq > Ollama. local_only => Ollama only.
-/// Output always passes through to_traditional() so cards/summaries are never 簡體.
+/// zh output always passes through to_traditional() so cards/summaries are never 簡體;
+/// lang=en skips the conversion (see localize_output).
 pub async fn chat(
     messages: &[Msg],
     json_mode: bool,
@@ -268,7 +331,7 @@ pub async fn chat(
     opts: &LlmOpts,
 ) -> Result<(String, String), String> {
     let (text, provider) = chat_raw(messages, json_mode, local_only, opts).await?;
-    Ok((to_traditional(&text), provider))
+    Ok((localize_output(text, opts.lang), provider))
 }
 
 /// chat_raw 的路由決策(抽成純函數供測試)。重點:本機模式優先於 BYO ——
@@ -347,6 +410,52 @@ mod tests {
         // 非本機模式:BYO 照常優先,沒 BYO 走 Groq -> Ollama 串接
         assert_eq!(pick_route(false, true), Route::Byo);
         assert_eq!(pick_route(false, false), Route::Cascade);
+    }
+
+    #[test]
+    fn lang_parse_header_values() {
+        use super::Lang;
+        // en 系列(含 region tag、大小寫、空白)=> En
+        assert_eq!(Lang::parse(Some("en")), Lang::En);
+        assert_eq!(Lang::parse(Some("EN")), Lang::En);
+        assert_eq!(Lang::parse(Some("en-US")), Lang::En);
+        assert_eq!(Lang::parse(Some(" en ")), Lang::En);
+        // 預設與 zh 系列 => ZhTw(沒帶 header 行為不變)
+        assert_eq!(Lang::parse(None), Lang::ZhTw);
+        assert_eq!(Lang::parse(Some("zh-TW")), Lang::ZhTw);
+        assert_eq!(Lang::parse(Some("zh")), Lang::ZhTw);
+        assert_eq!(Lang::parse(Some("")), Lang::ZhTw);
+        assert_eq!(Lang::parse(Some("english")), Lang::ZhTw); // 不認模糊值,寧可回預設
+        assert_eq!(Lang::parse(Some("enx")), Lang::ZhTw);
+        assert_eq!(Lang::parse(Some("中文標頭")), Lang::ZhTw); // 任意 UTF-8 不可 panic
+    }
+
+    #[test]
+    fn prompt_assembly_appends_directive_only_for_en() {
+        use super::{with_cleanup_lang, with_output_lang, Lang};
+        let sys = "你是白板整理助手。".to_string();
+        // zh:prompt 原樣 —— 零回歸
+        assert_eq!(with_output_lang(sys.clone(), Lang::ZhTw), sys);
+        assert_eq!(with_cleanup_lang(sys.clone(), Lang::ZhTw), sys);
+        // en:生成型 prompt 附加英文輸出指令(在尾端、保留原 prompt)
+        let out = with_output_lang(sys.clone(), Lang::En);
+        assert!(out.starts_with(&sys));
+        assert!(out.contains("in natural, concise English"));
+        // en:清稿 prompt 附加「同語言、不翻譯」指令(不是輸出英文指令)
+        let cl = with_cleanup_lang(sys.clone(), Lang::En);
+        assert!(cl.starts_with(&sys));
+        assert!(cl.contains("do not translate"));
+        assert!(!cl.contains("in natural, concise English"));
+    }
+
+    #[test]
+    fn localize_output_skips_opencc_for_en() {
+        use super::{localize_output, Lang};
+        // zh:簡體硬轉繁體(原行為)
+        assert_eq!(localize_output("开始节点".into(), Lang::ZhTw), "開始節點");
+        // en:原樣通過 —— 不過 opencc(就算內容夾雜簡體也不動,輸出語言由 prompt 管)
+        assert_eq!(localize_output("Start node".into(), Lang::En), "Start node");
+        assert_eq!(localize_output("开始节点".into(), Lang::En), "开始节点");
     }
 
     #[test]

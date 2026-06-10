@@ -1,5 +1,6 @@
 import { createRoot } from 'react-dom/client'
 import './styles.css'
+import './i18n'
 import App from './App'
 
 // NOTE: no <StrictMode>. In dev, StrictMode double-invokes effects (mount →
