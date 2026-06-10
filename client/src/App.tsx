@@ -202,7 +202,8 @@ export default function App() {
 		const yFrames = doc.getMap<any>('frames') // diagrams on the canvas
 		const yTranscript = doc.getArray<any>('transcript') // running word-for-word meeting log
 		const LOCAL = { local: true } // origin tag so undo only tracks MY edits, not remote/Mori
-		const undoMgr = new Y.UndoManager([yShapes, yConnectors], { trackedOrigins: new Set([LOCAL]) })
+		// yFrames is in scope so deleting/moving/renaming a frame is undoable too
+		const undoMgr = new Y.UndoManager([yShapes, yConnectors, yFrames], { trackedOrigins: new Set([LOCAL]) })
 		;(window as any).__getShapes = () => Array.from(yShapes.values())
 		;(window as any).__getConnectors = () => Array.from(yConnectors.values())
 		;(window as any).__getFrames = () => Array.from(yFrames.values())
@@ -258,6 +259,8 @@ export default function App() {
 	const [agentText, setAgentText] = useState('') // manual-transcript draft (local only, not synced)
 	const [showPaste, setShowPaste] = useState(false) // the paste-transcript option is hidden by default
 	const [busy, setBusy] = useState('')
+	// 最近一輪 AI 新增的卡 id(誠實範圍:只含「新增」;AI 的修改/刪除 UndoManager 不追遠端,不在此列)
+	const [lastAiIds, setLastAiIds] = useState<string[]>([])
 	const editRef = useRef<HTMLTextAreaElement>(null)
 	const stageRef = useRef<any>(null)
 	const dragTs = useRef(0)
@@ -880,7 +883,21 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 		} else {
 			const fl = r.frameLabel ? `${r.frameLabel} · ` : ''
 			setBusy(`${prefix}${fl}+${r.added?.length ?? r.stickies ?? 0} 張、+${r.connectors ?? 0} 連線`)
+			// 每一輪 content 回應都更新「上一輪 AI 新增」清單(被跳過的段落沒有 ids,不動清單)
+			if (Array.isArray(r.ids)) setLastAiIds(r.ids)
 		}
+	}
+	// 撤銷上一輪 AI:移除那一輪新增的卡與其相關連線(AI 的修改/刪除不在此列)
+	function undoLastAi() {
+		const ids = new Set(lastAiIds.filter((id) => yShapes.has(id)))
+		if (ids.size) {
+			tx(() => {
+				for (const [cid, c] of yConnectors) if (ids.has(c.from) || ids.has(c.to)) yConnectors.delete(cid)
+				for (const id of ids) yShapes.delete(id)
+			})
+		}
+		setLastAiIds([])
+		setBusy(ids.size ? `已移除上一輪 AI 新增的 ${ids.size} 張卡` : '上一輪 AI 新增的卡已不在板上')
 	}
 	async function addFrame(type: string, title: string) {
 		await fetch(`${SYNC_HTTP}/api/rooms/${encodeURIComponent(room)}/frames`, {
@@ -2441,6 +2458,16 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 							<div ref={transcriptEndRef} />
 						</div>
 					</div>
+				)}
+				{lastAiIds.length > 0 && (
+					<button
+						className="btn-soft"
+						style={{ width: '100%', marginTop: 6, fontSize: 12 }}
+						title="移除上一輪 AI 新增的卡與連線(AI 對既有卡的修改與刪除不在此列)"
+						onClick={undoLastAi}
+					>
+						撤銷上輪 AI({lastAiIds.length} 張)
+					</button>
 				)}
 				{busy && <div style={{ marginTop: 6, fontSize: 12, color: 'var(--ink-soft)' }}>{busy}</div>}
 			</div>
