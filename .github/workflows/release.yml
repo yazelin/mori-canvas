@@ -1,7 +1,7 @@
 name: release
 
 # 打 `v*` tag → build 兩種「下載即用」掛上 GitHub Release:
-#   1) mori-canvas-server (Linux/Windows) — 自己跑 server、別人連 LAN(多人會議用這個)
+#   1) mori-canvas-server (Linux/macOS/Windows) — 自己跑 server、別人連 LAN(多人會議用這個)
 #   2) Mori Canvas 桌面安裝檔 (.msi/.exe/.AppImage/.deb) — 雙擊就開的原生 App
 # 前端用 Node build 成 client/dist 後由 Rust binary 內嵌,所以兩種都要先 npm build:client。
 # 手動 workflow_dispatch = 只驗證 server build(不發 Release;桌面 job 只在 v* tag 跑)。
@@ -27,6 +27,7 @@ jobs:
       matrix:
         include:
           - { name: linux-x86_64, os: ubuntu-latest, ext: "" }
+          - { name: macos-aarch64, os: macos-latest, ext: "" } # Apple Silicon(macos-latest 是 arm64 runner)
           - { name: windows-x86_64, os: windows-latest, ext: ".exe" }
     steps:
       - uses: actions/checkout@v4
@@ -52,6 +53,8 @@ jobs:
           1) 準備一把 Groq key:設環境變數 GROQ_API_KEY,或同資料夾放一個 .env 檔
              內容一行: GROQ_API_KEY=你的key   (也可改用設定頁的「用你自己的 AI」)
           2) 執行 mori-canvas-server(Windows 是 .exe)。
+             macOS 第一次會被 Gatekeeper 擋(未簽章),先解除隔離:
+             xattr -d com.apple.quarantine ./mori-canvas-server
           3) 瀏覽器開 http://localhost:1334/
           4) 要讓同網段的人一起開會(手機要錄音需 HTTPS):見 GitHub README「公司區網版」。
           TXT
