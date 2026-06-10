@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="zh-TW">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<title>常見問題 — Mori Canvas 共筆白板</title>
+		<meta name="description" content="Mori Canvas 常見問題:試玩很慢怎麼辦、要不要註冊、麥克風沒反應、房間誰能進、資料存在哪、能不能離線、跟 Miro/FigJam 差在哪 —— 老實回答。" />
+		<meta name="theme-color" content="#faf7f1" />
+		<meta property="og:title" content="常見問題 — Mori Canvas 共筆白板" />
+		<meta property="og:description" content="試玩、錄音、房間資料、自架 —— 最常被問的問題,老實回答。" />
+		<meta property="og:image" content="https://mori-canvas.onrender.com/og.png" />
+		<meta property="og:image:width" content="1200" />
+		<meta property="og:image:height" content="630" />
+		<meta name="twitter:card" content="summary_large_image" />
+		<meta name="twitter:image" content="https://mori-canvas.onrender.com/og.png" />
+		<link rel="preconnect" href="https://fonts.googleapis.com" />
+		<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+		<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet" />
+		<link rel="stylesheet" href="site.css" />
+	</head>
+	<body>
+		<nav class="topnav"><div class="nav-inner"><a class="brand" href="./">Mori Canvas</a><div class="links"><a href="./">首頁</a><a href="guide.html">操作手冊</a><a href="examples.html">範例教學</a><a href="selfhost.html">自架部署</a><a class="on" href="faq.html">常見問題</a><a class="try" href="https://mori-canvas.onrender.com/" target="_blank" rel="noreferrer">立即試玩</a></div></div></nav>
+
+		<header class="page">
+			<div class="wrap">
+				<h1>常見問題</h1>
+				<p class="lead">試玩、錄音、房間資料、自架 —— 最常被問的問題,老實回答。沒答到的,歡迎到 GitHub 開 issue 問。</p>
+			</div>
+		</header>
+
+		<section id="faq-demo">
+			<div class="wrap">
+				<h2>試玩與帳號</h2>
+
+				<details class="qa">
+					<summary>點開很慢,甚至一片白?</summary>
+					<p>正常。試玩站跑在 Render <b>免費方案</b>,閒置 15 分鐘會休眠 —— 第一個點開的人要等約 <b>30–60 秒</b>冷啟動,白畫面多等一下就好,醒來之後就順了。要穩定常開,自架或換 Render 付費方案。</p>
+				</details>
+
+				<details class="qa">
+					<summary>要註冊嗎?要錢嗎?</summary>
+					<p>不用註冊,進場輸入一個名字就能用。試玩站免費,AI 走站長的 key,有 per-IP 限流;想用自己的額度,⚙ 設定可填「用你自己的 AI」。自架也是零授權成本(全 MIT),AI 用自己的 Groq key —— Groq 有免費額度,到 <a href="https://console.groq.com/keys" target="_blank" rel="noreferrer">console.groq.com/keys</a> 申請即可。</p>
+					<p>進去不知道從哪開始?右上「範例」按鈕(或空白板上的提示)可一鍵載入 5 個範例板;初次進入也有 6 步互動導覽,之後想重看按「?」。</p>
+				</details>
+
+				<details class="qa">
+					<summary>手機能用嗎?</summary>
+					<p>可以。手機能看、能編、能錄音(雙指縮放、單點卡片開選單),還能裝成 <b>PWA</b>:Android / Chrome 在選單按「安裝 App」,iPhone / Safari 用「分享 → 加入主畫面」,之後就是全螢幕、像原生 App。</p>
+				</details>
+			</div>
+		</section>
+
+		<section id="faq-voice">
+			<div class="wrap">
+				<h2>錄音與 AI</h2>
+
+				<details class="qa">
+					<summary>麥克風沒反應?</summary>
+					<p>依序檢查三件事:① 瀏覽器有沒有允許麥克風(網址列的鎖頭圖示);② 系統的輸入裝置選對了沒,有些筆電預設選到沒在收音的那個;③ 錄音只在 <b>https 或 localhost</b> 下可用 —— 這是瀏覽器規定,<code>http://區網IP</code> 會被直接擋。自架要讓手機錄音,用 <code>npm run setup</code> + <code>npm run start:lan</code> 跑 HTTPS 版。</p>
+				</details>
+
+				<details class="qa">
+					<summary>講中文以外的語言可以嗎?</summary>
+					<p>語音辨識用 Whisper,本身是多語模型,講英文等其他語言也認得。不過介面與 AI 產出的卡片目前以<b>繁體中文</b>為主,中文輸出會由程式硬轉成繁體(台灣用語),不靠模型自律。</p>
+				</details>
+
+				<details class="qa">
+					<summary>AI 把話整理錯了怎麼辦?</summary>
+					<p>先說它怎麼降低錯誤:pipeline 是<b>兩段式</b> —— 先清稿(收斂重複字詞、刪「嗯、那個」、重斷句)再畫卡,口語贅字不會被抄上板。還是錯的話,三條路:用講的改(<span class="say">把官網那張改寫成 RWD 重構</span>、<span class="say">把 3 號改成風險</span>)、雙擊卡片直接改字、或 Ctrl+Z 復原。</p>
+				</details>
+			</div>
+		</section>
+
+		<section id="faq-data">
+			<div class="wrap">
+				<h2>房間與資料</h2>
+
+				<details class="qa">
+					<summary>房間誰能進?</summary>
+					<p>知道房號或連結的人就能進,沒有另外的登入 —— <b>房號就是密碼,別公開貼</b>。另外注意:試玩站的分享面板看得到「進行中房間清單」(含房號),所以試玩站上別放不想被外人看到的內容;要私密,自架。</p>
+				</details>
+
+				<details class="qa">
+					<summary>資料存在哪?會保留多久?</summary>
+					<p>自架:每個房間存在主機的 <code>.data/&lt;房號&gt;.bin</code>,重啟自動還原、沒有過期,資料不出你的機器。試玩站:存在 Render 容器內,<b>重新部署或休眠重啟就清空</b> —— 別放敏感內容,想留就用「下載畫板檔(.json)」帶走。</p>
+				</details>
+
+				<details class="qa">
+					<summary>可以匯出嗎?</summary>
+					<p>可以,工具列「匯出」有五種:<b>白板摘要</b>(AI 依圖表類型整理成一頁)、<b>白板紀錄 HTML</b>(摘要 + 全程逐字稿,單檔離線可讀)、<b>Markdown</b>、<b>PNG</b>、<b>畫板檔 .json</b>(完整存檔,可匯入還原、傳給別人接著編)。</p>
+					<img class="shot" src="export-dialog.png" alt="匯出對話框:白板摘要、HTML、Markdown、PNG、畫板檔 .json" />
+				</details>
+			</div>
+		</section>
+
+		<section id="faq-selfhost">
+			<div class="wrap">
+				<h2>自架與其他</h2>
+
+				<details class="qa">
+					<summary>跟 Miro / FigJam 差在哪?</summary>
+					<p>定位不同。它們是「人畫」的泛用協作白板,功能廣度比 Mori Canvas 大得多;Mori Canvas 的核心是<b>語音 → AI 自動長板</b> —— 你開會講話,便利貼、連線、分區自己長出來。另外它可自架、全 MIT、零授權成本,資料留在自己機器。要泛用畫圖工具,用它們;要「會議講完板就好了」,用這個。</p>
+				</details>
+
+				<details class="qa">
+					<summary>離線(純內網)能用嗎?</summary>
+					<p>可以。server 跑在自己機器,STT 切「自訂 · 本機 whisper-server」,LLM 用本機 Ollama(或設 <code>LLM_LOCAL_ONLY=1</code> 強制全走本機),全程資料不出網,沒有對外網路也能開會。試玩站本身則需要網路。</p>
+				</details>
+
+				<details class="qa">
+					<summary>怎麼回報問題、許願功能?</summary>
+					<p>到 <a href="https://github.com/yazelin/mori-canvas/issues" target="_blank" rel="noreferrer">GitHub 開 issue</a>。bug、想要的功能、甚至「跑出簡體字」這種小事都歡迎 —— 這專案還在積極開發,回報就是幫忙。</p>
+				</details>
+			</div>
+		</section>
+
+		<footer><div class="wrap">MIT 授權 · 用 Rust + React 自架的會議白板<div class="links"><a href="https://github.com/yazelin/mori-canvas" target="_blank" rel="noreferrer">GitHub</a><a href="https://mori-canvas.onrender.com/" target="_blank" rel="noreferrer">試玩</a><a href="faq.html">FAQ</a></div></div></footer>
+	</body>
+</html>
