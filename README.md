@@ -33,11 +33,12 @@
 
 1. **瀏覽器**:麥克風錄音,偵測靜音自動切一段 → 把音檔位元組 POST 給主機(`/api/voice`)。
 2. **主機 · STT**:mori-ear(Whisper)把音檔轉成文字。
-3. **主機 · AI**:把「這段文字」+「目前整張白板(每張卡的類型/負責人/標籤,帶索引)」一起丟給 LLM。LLM 先判斷這句是**指令(command)**還是**會議內容(content)**,回一個 JSON。
-4. **主機 · 驗證 + 執行**(這層是寫死的規則,不是 AI):檢查 JSON 合法(索引在範圍、動作有效)。
+3. **主機 · 清稿(stage 1)**:STT 原文常有贅字(嗯/那個/對對對)、斷錯句、錯字。先過規則層(收斂重複字詞、刪段首語助詞),再用 LLM 做最小幅度清稿(`prompts/transcript-cleanup.md`:修錯字、補標點重斷句、刪冗詞、不增減語意);LLM 失敗就用規則層結果,**清稿永遠不會擋住建卡**。太短的輸入(< 10 字,多半是指令)只過規則層;API 可帶 `"cleanup": false` 整段跳過。
+4. **主機 · AI 畫卡(stage 2)**:把「清好的文字」+「目前整張白板(每張卡的類型/負責人/標籤,帶索引)」一起丟給 LLM。LLM 先判斷這句是**指令(command)**還是**會議內容(content)**,回一個 JSON。
+5. **主機 · 驗證 + 執行**(這層是寫死的規則,不是 AI):檢查 JSON 合法(索引在範圍、動作有效)。
    - 是**指令** → 直接執行:排版 / 篩選 / 指派負責人 / 改類型 / 加標籤 / 改寫文字。
    - 是**內容** → 整理成便利貼(配色、負責人、標籤、連線),或改/併/刪既有卡。
-5. **同步回所有人**:白板變動透過 yjs(websocket)即時廣播給每一台瀏覽器;只影響「自己畫面」的指令(像篩選)則回傳給講話的那台套用。
+6. **同步回所有人**:白板變動透過 yjs(websocket)即時廣播給每一台瀏覽器;只影響「自己畫面」的指令(像篩選)則回傳給講話的那台套用。
 
 所以 **理解與整理都在伺服端(主機)做,做完同步回網頁**;瀏覽器只負責「錄音 + 畫」——這也是同事零安裝的原因。判斷指令靠的是 **LLM 的理解,不是關鍵字比對**:例如「交給阿明做」會被當成指派(沒講「指派」)、「改寫成線上掛號」走改文字、「改成風險」走改類型。貼現成逐字稿走的是同一條路,只是跳過第 2 步 STT。
 
@@ -216,6 +217,7 @@ curl -X POST localhost:1334/api/visualize -H 'Content-Type: application/json' \
 
 ## 功能一覽
 
+- **兩段式 AI(清稿 → 畫卡)**:逐字稿先過 stage-1 清稿(規則層 + LLM,`prompts/transcript-cleanup.md` 改了即生效)再進畫卡 agent,贅字冗詞、斷錯句不會被抄進卡片;`/api/agent`、`/api/visualize` 可帶 `"cleanup": false` 跳過,`/api/voice` 回傳 `transcript`(清後)+ `rawTranscript`(原文)。
 - **AI 整理**:逐字稿 → Groq `gpt-oss-120b`(qwen3 後備)→ 便利貼(按 kind 上色)+ 關係連線。**累積 + 智慧合併**:餵現有便利貼給 agent,只加新重點不重複;**op-based** 還能改寫/合併/刪除既有卡(決議翻案、待辦完成時板不會只進不出)。
 - **連續會議記錄**:VAD 靜音自動斷句,整場語音邊講邊上板(hands-free)。
 - **語音指令(intent 判斷)**:agent 會分辨你這句是「會議內容」還是「指令」。講「幫我排一下 / 只看亞澤的 / 把這張指給小明 / 改成決議」會直接執行(排版/篩選/指派/改類型),不用找按鈕。agent 也吃得到目前每張卡的類型/負責人/標籤,所以「知道現況」。
@@ -226,7 +228,7 @@ curl -X POST localhost:1334/api/visualize -H 'Content-Type: application/json' \
 - **逐字記錄(transcript log)**:每段錄音進共享逐字稿面板(也餵給 AI 當上下文,卡片更準),跟著畫板存檔。
 - **白板紀錄匯出**:**HTML**(type-aware AI 摘要 + 逐字稿,雙擊就能讀)/ MD / PNG;**畫板存檔(.json)** 可完整還原、傳給別人接著編。
 - **備註**:任何圖表都能貼的隨手註記(自動排列與 AI 都不動它)。
-- **板型 × 自動排版**:10 種板型(會議/組織/流程/架構/心智圖/看板/SWOT/時間軸/魚骨/甘特),6 種排版,frame-aware。
+- **板型 × 自動排版(保證不互疊)**:10 種板型(會議/組織/流程/架構/心智圖/看板/SWOT/時間軸/魚骨/甘特),6 種排版,frame-aware。樹狀圖用 tidy-tree(父節點置中於子樹上方);心智圖環半徑隨卡數撐大;SWOT 象限排網格;每次排版後跑碰撞防護;「排好」時 frame 會整批重新排位(列式、超寬換行),**卡片跟 frame 都不會互相疊住**。
 - **Bring Your Own AI**:訪客在設定填自己的 OpenAI 相容 base/key/model(OpenAI/Gemini/Azure/Groq/Ollama),用自己額度、不耗主機。
 - **進場報名 + 深淺主題**:進來先輸入名字(不再全是訪客);☾/☀ 切換亮/暗色(暖紙 / 森林夜)。
 - **房間 + 分享**:進場名字 gate、自動房號、QR、輸入房號加入、房間清單、結束此房。
@@ -246,7 +248,8 @@ curl -X POST localhost:1334/api/visualize -H 'Content-Type: application/json' \
 |---|---|---|
 | sync server | `server-rs/src/sync.rs` | `yrs` + `yrs-warp` 多房同步(跟 yjs JS client 互通)+ 持久化 `.data/<room>.bin` |
 | agent / LLM | `server-rs/src/agent.rs`, `llm.rs`, `apply.rs` | 逐字稿 → 意圖判斷 → board plan/指令;Groq(`gpt-oss-120b`)→ Ollama(`qwen3`);串流 Mori 游標 |
-| 排版 / 板型 | `server-rs/src/layout.rs`, `board_types.rs` | 6 種排版(分欄/樹/放射/象限/魚骨/甘特)+ 10 種板型,frame-aware |
+| 清稿(stage 1) | `server-rs/src/cleanup.rs`, `prompts/transcript-cleanup.md` | 規則層(重複字詞/段首語助詞)+ LLM 最小幅度清稿;失敗 fallback 規則層,不擋建卡 |
+| 排版 / 板型 | `server-rs/src/layout.rs`, `board_types.rs` | 6 種排版(分欄/tidy-tree/放射/象限/魚骨/甘特)+ 10 種板型,frame-aware;碰撞防護 + frame re-packing,卡片/frame 保證不互疊 |
 | STT | `server-rs/src/stt.rs` | Mori(委派 `mori-ear`)/ 自訂(Groq Whisper / 本機 whisper-server + ffmpeg 靜音剪) |
 | HTTP / 服務 | `server-rs/src/lib.rs` (`serve`) | warp:`/api/*` + `/sync` ws + 內嵌前端;`HTTPS=1`+`certs/` 自帶 TLS;`BIND`/`PORT` 可調 |
 | client | `client/src/App.tsx` | yjs + WebsocketProvider 同步 → react-konva 渲染;全部互動 + 錄音/agent 面板 + 畫板存檔/還原 |
