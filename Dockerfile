@@ -17,6 +17,8 @@ WORKDIR /app
 COPY server-rs ./server-rs
 COPY --from=client /app/client/dist ./client/dist
 COPY prompts ./prompts
+# DEMO 示範房種子是 include_str! 直讀 client/public(不是 dist)— 漏了這行 cargo 直接編不過
+COPY client/public/examples ./client/public/examples
 RUN cargo build --release --manifest-path server-rs/Cargo.toml
 
 # 3) runtime — ffmpeg for STT silence-trim, ca-certificates for HTTPS to Groq
