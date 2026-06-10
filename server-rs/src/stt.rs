@@ -144,13 +144,24 @@ async fn local_whisper(path: &str, url_override: &str) -> Result<String, String>
         .to_string())
 }
 
+/// 本機模式下雲端 STT 是否該擋(純函數供測試)。只擋 custom + cloud(Groq Whisper);
+/// mori-ear 模式不在這裡擋 —— ear 自己決定本機 whisper 或雲端,超出本 repo 控制範圍。
+fn cloud_stt_blocked(local_only: bool, mode: &str, stt_source: &str) -> bool {
+    local_only && mode == "custom" && stt_source != "local"
+}
+
 /// mode: "mori" | "custom"; stt_source: "cloud" | "local"
 pub async fn transcribe(
     audio_path: &str,
     mode: &str,
     stt_source: &str,
     whisper_url: &str,
+    local_only: bool,
 ) -> Result<String, String> {
+    // 本機模式:錄音不准上雲。在送出任何資料之前就擋下,錯誤訊息明講是本機模式擋的。
+    if cloud_stt_blocked(local_only, mode, stt_source) {
+        return Err("本機模式已封鎖雲端 STT — 請設定本機 whisper-server".into());
+    }
     if mode != "custom" {
         let out = tokio::process::Command::new(ear_path())
             .args(["--input", audio_path])
@@ -175,4 +186,19 @@ pub async fn transcribe(
     }
     // STT (Whisper) often emits 簡體 — convert so the transcript/逐字記錄 is 繁體 like the cards.
     result.map(|t| crate::llm::to_traditional(&t))
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn local_only_blocks_only_cloud_custom_stt() {
+        // 本機模式 + custom/cloud(Groq Whisper)=> 擋
+        assert!(super::cloud_stt_blocked(true, "custom", "cloud"));
+        // 本機 whisper-server 照常
+        assert!(!super::cloud_stt_blocked(true, "custom", "local"));
+        // mori-ear 模式不在此擋(ear 自行決定,超出本 repo 控制)
+        assert!(!super::cloud_stt_blocked(true, "mori", "cloud"));
+        // 非本機模式:雲端照常
+        assert!(!super::cloud_stt_blocked(false, "custom", "cloud"));
+    }
 }

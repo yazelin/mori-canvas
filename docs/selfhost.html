@@ -114,7 +114,7 @@ npm install &amp;&amp; npm run build      # vite build(前端)→ cargo build --
 					<tr><td><code>MORI_CANVAS_REGISTER=1</code></td><td>啟動時寫 <code>~/.mori/mori-canvas-server.json</code> 服務描述,讓 AgentOS 能 dispatch 進來</td><td>桌面版啟動會自動做;standalone 不受影響</td></tr>
 					<tr><td><code>MORI_CANVAS_PROMPTS</code></td><td>提示詞覆寫目錄</td><td>見下方「提示詞客製」</td></tr>
 					<tr><td><code>WHISPER_MODEL</code></td><td>本機 whisper-server 用的模型</td><td>預設 small;有顯卡可換 <code>large-v3-turbo</code></td></tr>
-					<tr><td><code>LLM_LOCAL_ONLY</code></td><td>鎖定「全走本機」</td><td>server 目前還沒讀這個 env,見下節的老實話</td></tr>
+					<tr><td><code>LLM_LOCAL_ONLY=1</code></td><td>開機鎖定本機模式:AI 只走本機 Ollama,雲端 STT 與訪客 BYO 端點一律封鎖,設定頁/API 關不掉</td><td>資料不出網的部署用;詳見下節「本機模式」</td></tr>
 				</table>
 			</div>
 		</section>
@@ -143,8 +143,8 @@ bash whisper/run-whisper.sh                      # 啟動在 127.0.0.1:8089
 powershell -ExecutionPolicy Bypass -File scripts\setup-whisper-windows.ps1
 powershell -ExecutionPolicy Bypass -File whisper\run-whisper.ps1</code></pre>
 				<p>然後設定 → 自訂 → 本機 whisper,網址填 <code>http://127.0.0.1:8089/inference</code>(留空會自動偵測 <code>~/.mori/whisper-server.json</code>)。</p>
-				<h3>本機模式的老實話</h3>
-				<p>「完全不出網」目前的做法是:STT 選「自訂 · 本機」+ AI 走本機 Ollama,再開設定頁的 local-only 切換。但要知道現況限制 —— 這個切換存在 server 記憶體,<b>重啟會還原</b>;<code>LLM_LOCAL_ONLY</code> 環境變數的支援(開機鎖死、涵蓋 STT 與 BYO 繞道)還沒實作,進度看 <a href="https://github.com/yazelin/mori-canvas/issues/17" target="_blank" rel="noreferrer">issue #17</a>。在那之前,對資料敏感的場合請自己確認設定沒被改回雲端。</p>
+				<h3>本機模式(LLM_LOCAL_ONLY)</h3>
+				<p>「完全不出網」的做法:啟動時設 <code>LLM_LOCAL_ONLY=1</code>(或 <code>true</code>),server 開機即進入本機模式且<b>鎖死</b> —— AI 只走本機 Ollama(訪客自帶的 <code>X-LLM-Base</code> 端點一律忽略,不能繞道)、雲端 Groq Whisper 直接拒絕(回「本機模式已封鎖雲端 STT」),設定頁與 API 都關不掉(回「此部署鎖定本機模式」),重啟也不會退回雲端;<code>/api/settings</code> 會回 <code>lockedLocalOnly: true</code>。STT 請搭配「自訂 · 本機 whisper-server」。唯一例外是 mori-ear 模式:ear 自己決定走本機或雲端,不在本 repo 控制範圍,純內網場合請確認 ear 設定。沒設這個 env 時,設定頁的 local-only 切換照常可用,但存在 server 記憶體、重啟會還原。</p>
 			</div>
 		</section>
 

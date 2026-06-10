@@ -139,6 +139,30 @@ struct Settings {
     #[serde(rename = "whisperUrl")]
     whisper_url: String,
 }
+/// LLM_LOCAL_ONLY env 解析(純函數供測試):"1" / "true" 視為鎖定本機模式。
+fn parse_local_only_env(v: Option<&str>) -> bool {
+    match v.map(str::trim) {
+        Some(s) => s == "1" || s.eq_ignore_ascii_case("true"),
+        None => false,
+    }
+}
+/// 部署層的本機模式鎖:LLM_LOCAL_ONLY=1 時 local_only 開機即 true 且鎖死。
+/// 鎖定狀態只來自 env、不進 SETTINGS —— 沒有任何 API 能改它,重啟也不會退回雲端。
+static LOCKED_LOCAL_ONLY: Lazy<bool> =
+    Lazy::new(|| parse_local_only_env(std::env::var("LLM_LOCAL_ONLY").ok().as_deref()));
+/// POST /api/settings 的 localOnly 變更決策(純函數供測試):
+/// 鎖定部署不允許關閉本機模式;回傳 (新值, 拒絕時的錯誤訊息)。
+fn apply_local_only_change(
+    locked: bool,
+    current: bool,
+    requested: Option<bool>,
+) -> (bool, Option<&'static str>) {
+    match requested {
+        Some(false) if locked => (current, Some("此部署鎖定本機模式")),
+        Some(v) => (v, None),
+        None => (current, None),
+    }
+}
 static SETTINGS: Lazy<Mutex<Settings>> = Lazy::new(|| {
     // capability-aware defaults: no mori-ear (e.g. on a cloud host) => custom/cloud (Groq Whisper)
     let caps = stt::stt_capabilities();
@@ -155,7 +179,7 @@ static SETTINGS: Lazy<Mutex<Settings>> = Lazy::new(|| {
         auto_tidy: true,
         mode: if has_ear { "mori" } else { "custom" }.into(),
         stt_source: if has_ws { "local" } else { "cloud" }.into(),
-        local_only: false,
+        local_only: *LOCKED_LOCAL_ONLY,
         whisper_url: String::new(),
     })
 });
@@ -798,7 +822,7 @@ pub async fn serve(port: u16) {
     // GET/POST /api/settings
     let settings_get = warp::get().and(warp::path!("api" / "settings")).and_then(|| async move {
         let s = SETTINGS.lock().await.clone();
-        let mut o = json!({ "ok": true, "spacing": s.spacing, "autoTidy": s.auto_tidy, "mode": s.mode, "sttSource": s.stt_source, "localOnly": s.local_only, "whisperUrl": s.whisper_url, "groqKey": llm::groq_key().is_some() });
+        let mut o = json!({ "ok": true, "spacing": s.spacing, "autoTidy": s.auto_tidy, "mode": s.mode, "sttSource": s.stt_source, "localOnly": s.local_only, "lockedLocalOnly": *LOCKED_LOCAL_ONLY, "whisperUrl": s.whisper_url, "groqKey": llm::groq_key().is_some() });
         for src in [llm::config_info(), stt::stt_capabilities(), sponsor_config()] {
             if let (Value::Object(dst), Value::Object(m)) = (&mut o, src) {
                 for (k, v) in m {
@@ -826,9 +850,13 @@ pub async fn serve(port: u16) {
                 s.stt_source = v.into();
             }
         }
-        if let Some(v) = body.get("localOnly").and_then(|v| v.as_bool()) {
-            s.local_only = v;
-        }
+        // 鎖定部署(LLM_LOCAL_ONLY)不允許關閉本機模式 —— 其他欄位照常生效
+        let (lo, lo_err) = apply_local_only_change(
+            *LOCKED_LOCAL_ONLY,
+            s.local_only,
+            body.get("localOnly").and_then(|v| v.as_bool()),
+        );
+        s.local_only = lo;
         if let Some(v) = body.get("whisperUrl").and_then(|v| v.as_str()) {
             s.whisper_url = v.chars().take(200).collect();
         }
@@ -836,7 +864,12 @@ pub async fn serve(port: u16) {
         if let Some(v) = body.get("groqApiKey").and_then(|v| v.as_str()) {
             llm::set_runtime_groq_key(v);
         }
-        Ok::<_, warp::Rejection>(warp::reply::json(&json!({ "ok": true, "spacing": s.spacing, "autoTidy": s.auto_tidy, "mode": s.mode, "sttSource": s.stt_source, "localOnly": s.local_only, "whisperUrl": s.whisper_url, "groqKey": llm::groq_key().is_some(), "moriEar": stt::stt_capabilities().get("moriEar").cloned().unwrap_or(json!(false)), "whisperServer": stt::stt_capabilities().get("whisperServer").cloned().unwrap_or(json!(false)) })))
+        let mut o = json!({ "ok": true, "spacing": s.spacing, "autoTidy": s.auto_tidy, "mode": s.mode, "sttSource": s.stt_source, "localOnly": s.local_only, "lockedLocalOnly": *LOCKED_LOCAL_ONLY, "whisperUrl": s.whisper_url, "groqKey": llm::groq_key().is_some(), "moriEar": stt::stt_capabilities().get("moriEar").cloned().unwrap_or(json!(false)), "whisperServer": stt::stt_capabilities().get("whisperServer").cloned().unwrap_or(json!(false)) });
+        if let Some(e) = lo_err {
+            o["ok"] = json!(false);
+            o["error"] = json!(e);
+        }
+        Ok::<_, warp::Rejection>(warp::reply::json(&o))
     });
 
     // POST /api/agent/:room — the AI turn (intent classify -> command or content)
@@ -914,7 +947,8 @@ pub async fn serve(port: u16) {
                 let ext = sanitize_ext(q.get("ext").map(|s| s.as_str()).unwrap_or("webm"));
                 let tmp = write_tmp("t", &ext, &body).await;
                 let s = SETTINGS.lock().await.clone();
-                let r = stt::transcribe(&tmp, &s.mode, &s.stt_source, &s.whisper_url).await;
+                let r = stt::transcribe(&tmp, &s.mode, &s.stt_source, &s.whisper_url, s.local_only)
+                    .await;
                 let _ = tokio::fs::remove_file(&tmp).await;
                 Ok::<_, warp::Rejection>(match r {
                     Ok(text) => warp::reply::json(&json!({ "ok": true, "text": text })),
@@ -942,7 +976,8 @@ pub async fn serve(port: u16) {
                 let tmp = write_tmp("voice", &ext, &body).await;
                 let s = SETTINGS.lock().await.clone();
                 let transcript =
-                    stt::transcribe(&tmp, &s.mode, &s.stt_source, &s.whisper_url).await;
+                    stt::transcribe(&tmp, &s.mode, &s.stt_source, &s.whisper_url, s.local_only)
+                        .await;
                 let _ = tokio::fs::remove_file(&tmp).await;
                 let transcript = match transcript {
                     Ok(t) => t,
@@ -1004,8 +1039,13 @@ pub async fn serve(port: u16) {
             let ext = sanitize_ext(q.get("ext").map(|s| s.as_str()).unwrap_or("webm"));
             let tmp = write_tmp("c", &ext, &body).await;
             let s = SETTINGS.lock().await.clone();
-            let transcript = stt::transcribe(&tmp, &s.mode, &s.stt_source, &s.whisper_url).await.unwrap_or_default();
+            // STT 失敗要回報而不是吞掉 —— 本機模式封鎖雲端時,使用者得知道是模式擋的、不是壞掉
+            let transcript = stt::transcribe(&tmp, &s.mode, &s.stt_source, &s.whisper_url, s.local_only).await;
             let _ = tokio::fs::remove_file(&tmp).await;
+            let transcript = match transcript {
+                Ok(t) => t,
+                Err(e) => return Ok::<_, warp::Rejection>(warp::reply::json(&json!({ "ok": false, "error": e }))),
+            };
             let room = sync::get_or_create_room(&rooms, &name).await;
             let cur = apply::card_current(&room, &card_id);
             if cur.is_none() {
@@ -1190,6 +1230,44 @@ pub async fn serve(port: u16) {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn llm_local_only_env_values() {
+        // "1" / "true"(不分大小寫、容忍空白)視為鎖定,其他都不是
+        assert!(parse_local_only_env(Some("1")));
+        assert!(parse_local_only_env(Some("true")));
+        assert!(parse_local_only_env(Some("TRUE")));
+        assert!(parse_local_only_env(Some(" 1 ")));
+        assert!(!parse_local_only_env(Some("0")));
+        assert!(!parse_local_only_env(Some("false")));
+        assert!(!parse_local_only_env(Some("")));
+        assert!(!parse_local_only_env(None));
+    }
+
+    #[test]
+    fn locked_local_only_cannot_be_turned_off() {
+        // 鎖定時嘗試關閉 => 值不動、回中文錯誤
+        assert_eq!(
+            apply_local_only_change(true, true, Some(false)),
+            (true, Some("此部署鎖定本機模式"))
+        );
+        // 鎖定時重複開啟 / 沒帶 localOnly => 照常、無錯誤
+        assert_eq!(
+            apply_local_only_change(true, true, Some(true)),
+            (true, None)
+        );
+        assert_eq!(apply_local_only_change(true, true, None), (true, None));
+        // 未鎖定:自由開關
+        assert_eq!(
+            apply_local_only_change(false, true, Some(false)),
+            (false, None)
+        );
+        assert_eq!(
+            apply_local_only_change(false, false, Some(true)),
+            (true, None)
+        );
+        assert_eq!(apply_local_only_change(false, false, None), (false, None));
+    }
 
     #[test]
     fn client_ip_trusts_last_hop_and_socket_fallback() {

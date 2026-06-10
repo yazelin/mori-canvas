@@ -271,37 +271,84 @@ pub async fn chat(
     Ok((to_traditional(&text), provider))
 }
 
+/// chat_raw 的路由決策(抽成純函數供測試)。重點:本機模式優先於 BYO ——
+/// 訪客自帶的 X-LLM-Base 端點多半在雲端,若先看 BYO 就成了 local_only 的繞道,
+/// 所以 local_only 時 BYO 一律忽略、只走本機 Ollama。
+#[derive(Debug, PartialEq)]
+enum Route {
+    /// 訪客自帶端點(僅非本機模式)
+    Byo,
+    /// 本機模式:只走 Ollama;byo_ignored 標示有帶 BYO 但被忽略
+    LocalOnly { byo_ignored: bool },
+    /// 預設串接:Groq -> Ollama
+    Cascade,
+}
+fn pick_route(local_only: bool, has_byo: bool) -> Route {
+    if local_only {
+        Route::LocalOnly {
+            byo_ignored: has_byo,
+        }
+    } else if has_byo {
+        Route::Byo
+    } else {
+        Route::Cascade
+    }
+}
+
 async fn chat_raw(
     messages: &[Msg],
     json_mode: bool,
     local_only: bool,
     opts: &LlmOpts,
 ) -> Result<(String, String), String> {
-    if let Some((base, key, model)) = opts.custom() {
-        return Ok((
-            call_custom(base, key, model, messages, json_mode).await?,
-            format!("byo:{}", model),
-        ));
-    }
-    if local_only {
-        return Ok((
-            call_ollama(messages, json_mode).await?,
-            "ollama(local-only)".into(),
-        ));
-    }
-    match call_groq(messages, json_mode).await {
-        Ok(t) => Ok((t, "groq:gpt-oss-120b".into())),
-        Err(ge) => match call_ollama(messages, json_mode).await {
-            Ok(t) => Ok((t, "ollama".into())),
-            Err(oe) => Err(format!(
-                "both LLM providers failed — groq: {ge}; ollama: {oe}"
-            )),
+    match pick_route(local_only, opts.custom().is_some()) {
+        Route::LocalOnly { byo_ignored } => {
+            // provider 字串標明 BYO 被本機模式忽略,讓呼叫端/前端看得出不是走訪客端點
+            let provider = if byo_ignored {
+                "ollama(local-only,byo-ignored)"
+            } else {
+                "ollama(local-only)"
+            };
+            Ok((call_ollama(messages, json_mode).await?, provider.into()))
+        }
+        Route::Byo => {
+            let (base, key, model) = opts.custom().expect("pick_route 已確認有 BYO");
+            Ok((
+                call_custom(base, key, model, messages, json_mode).await?,
+                format!("byo:{}", model),
+            ))
+        }
+        Route::Cascade => match call_groq(messages, json_mode).await {
+            Ok(t) => Ok((t, "groq:gpt-oss-120b".into())),
+            Err(ge) => match call_ollama(messages, json_mode).await {
+                Ok(t) => Ok((t, "ollama".into())),
+                Err(oe) => Err(format!(
+                    "both LLM providers failed — groq: {ge}; ollama: {oe}"
+                )),
+            },
         },
     }
 }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn local_only_takes_priority_over_byo() {
+        use super::{pick_route, Route};
+        // 本機模式下帶 X-LLM-Base 也不准繞去訪客端點(可能在雲端)
+        assert_eq!(
+            pick_route(true, true),
+            Route::LocalOnly { byo_ignored: true }
+        );
+        assert_eq!(
+            pick_route(true, false),
+            Route::LocalOnly { byo_ignored: false }
+        );
+        // 非本機模式:BYO 照常優先,沒 BYO 走 Groq -> Ollama 串接
+        assert_eq!(pick_route(false, true), Route::Byo);
+        assert_eq!(pick_route(false, false), Route::Cascade);
+    }
+
     #[test]
     fn converts_simplified_to_traditional() {
         // the exact failure the user saw: 开始节点 must become 開始節點
