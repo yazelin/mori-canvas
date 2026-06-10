@@ -4,6 +4,8 @@ import { Stage, Layer, Group, Rect, Text, Arrow, Circle } from 'react-konva'
 import * as Y from 'yjs'
 import { WebsocketProvider } from 'y-websocket'
 import QRCode from 'qrcode'
+import { useTranslation, Trans } from 'react-i18next'
+import { apiLang, setLang } from './i18n'
 import { fitCardSize, BASE_FONT } from './fitCardSize'
 
 type Sticky = {
@@ -99,24 +101,15 @@ const CARD_DARK = {
 	stroke: 'rgba(0,0,0,0.25)',
 	selStroke: '#f0ead9',
 }
-const KIND_LABEL: Record<string, string> = { yellow: '主題', green: '待辦', blue: '決議', red: '風險', note: '備註' }
+// card kinds — labels live in the locale files (kind.<color>)
+const KIND_KEYS = ['yellow', 'green', 'blue', 'red', 'note'] as const
 const KIND_ORDER = ['yellow', 'green', 'blue', 'red'] as const
-// board types (mirror of server/board-types.ts, for the picker + badge)
-const WB_TYPES: { key: string; label: string; blurb: string }[] = [
-	{ key: 'meeting', label: '會議白板', blurb: '討論 → 主題 / 待辦 / 決議 / 風險,分欄整理' },
-	{ key: 'orgchart', label: '組織架構圖', blurb: '部門 / 職位 / 隸屬關係,階層樹排列' },
-	{ key: 'flow', label: '流程圖', blurb: '步驟串成先後流程(左→右)' },
-	{ key: 'architecture', label: '系統架構圖', blurb: '元件 / 服務與呼叫依賴' },
-	{ key: 'mindmap', label: '心智圖', blurb: '中心主題向外發散的腦力激盪' },
-	{ key: 'kanban', label: '看板', blurb: '依狀態分欄的任務看板' },
-	{ key: 'swot', label: 'SWOT / 矩陣', blurb: '四象限分析(優勢/劣勢/機會/威脅)' },
-	{ key: 'timeline', label: '時間軸', blurb: '依時間先後排列的事件/里程碑' },
-	{ key: 'fishbone', label: '魚骨圖', blurb: '問題的因果分析(石川圖)' },
-	{ key: 'gantt', label: '甘特圖 / 排程', blurb: '任務排程,列=負責人,左→右時間' },
-]
-const typeLabel = (k: string) => WB_TYPES.find((t) => t.key === k)?.label || '白板'
+// board types (mirror of server/board-types.ts, for the picker + badge);
+// labels/blurbs live in the locale files (boardType.<key>.label/.blurb)
+const WB_TYPE_KEYS = ['meeting', 'orgchart', 'flow', 'architecture', 'mindmap', 'kanban', 'swot', 'timeline', 'fishbone', 'gantt'] as const
 // 錄音中的即時音量條:自己輪詢 ref,只重繪這個小元件
 function VolBars({ level }: { level: React.MutableRefObject<number> }) {
+	const { t } = useTranslation()
 	const [v, setV] = useState(0)
 	useEffect(() => {
 		const t = setInterval(() => setV(level.current), 150)
@@ -124,21 +117,21 @@ function VolBars({ level }: { level: React.MutableRefObject<number> }) {
 	}, [level])
 	const n = Math.min(5, Math.ceil(v * 90)) // SPEAK 門檻 0.018 約亮 2 格
 	return (
-		<span style={{ display: 'inline-flex', gap: 2, alignItems: 'flex-end', height: 14, marginLeft: 9 }} title="即時音量">
+		<span style={{ display: 'inline-flex', gap: 2, alignItems: 'flex-end', height: 14, marginLeft: 9 }} title={t('panel.volumeTitle')}>
 			{[0, 1, 2, 3, 4].map((i) => (
 				<span key={i} style={{ width: 3, height: 4 + i * 2.5, borderRadius: 1, background: i < n ? 'currentColor' : 'rgba(127,127,127,0.35)' }} />
 			))}
 		</span>
 	)
 }
-// 互動導覽步驟:sel 選不到的步驟會自動略過(例如手機版沒有桌面匯出鈕)
-const TOUR_STEPS: { sel: string; title: string; body: string }[] = [
-	{ sel: '[data-tour="record"]', title: '用講的就好', body: '按這顆開始會議記錄:正常講話,停頓一下,AI 就把那段重點整理成便利貼上板。錄音中也能直接下指令,像「幫我排一下」「把這張指給小明」。' },
-	{ sel: '[data-tour="paste"]', title: '已經有逐字稿?', body: '這個面板裡可以展開「貼現成的逐字稿」,貼上後丟給 AI,一樣整理成整張板。' },
-	{ sel: '.toolstrip', title: '手動工具列', body: '便利貼、備註、開新圖、連線、排列、復原都在這;雙擊白板空白處也能直接新增便利貼。' },
-	{ sel: '[data-tour="share"]', title: '拉人一起', body: '分享 / QR:同事掃 QR 或輸入房號就進來,大家即時一起編輯,完全零安裝。' },
-	{ sel: '[data-tour="export"]', title: '會後收尾', body: '匯出:AI 依板型寫一頁白板摘要,或輸出 Markdown / PNG / 可完整還原的畫板存檔。' },
-	{ sel: '[data-tour="help"]', title: '隨時回得來', body: '之後想重看說明、重新跑導覽、或載入範例庫,都從這顆按鈕。祝開會愉快。' },
+// 互動導覽步驟:sel 選不到的步驟會自動略過(例如手機版沒有桌面匯出鈕);文案在 locale tour.<key>
+const TOUR_STEPS: { sel: string; key: string }[] = [
+	{ sel: '[data-tour="record"]', key: 'record' },
+	{ sel: '[data-tour="paste"]', key: 'paste' },
+	{ sel: '.toolstrip', key: 'toolstrip' },
+	{ sel: '[data-tour="share"]', key: 'share' },
+	{ sel: '[data-tour="export"]', key: 'export' },
+	{ sel: '[data-tour="help"]', key: 'help' },
 ]
 // hierarchical types use orthogonal "axis" connectors (elbow), routed by direction
 const WB_TREE_DIR: Record<string, 'TB' | 'LR'> = { orgchart: 'TB', architecture: 'TB', flow: 'LR', timeline: 'LR' }
@@ -169,9 +162,6 @@ const SYNC_HTTP = '' // relative -> /api/... on the current origin
 // ?view=1 = 唯讀檢視連結(分享成品用):隱藏編輯 UI;真正的寫入封鎖在 server ws 層
 const READ_ONLY = new URLSearchParams(location.search).get('view') === '1'
 const SYNC_WS = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/sync`
-
-const DEMO_TRANSCRIPT =
-	'今天跟客戶開會討論線上預約系統。客戶現在用紙本登記,常常重複預約,想要病患自己選時段。我們報季繳方案。客戶擔心櫃台人員不會用後台,我說會做教學影片。風險是診所內網要先確認能不能對外。下一步我這邊下週三前先給一個 demo。'
 
 // short, human-readable room code (no ambiguous chars). Doubles as the "房號".
 const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
@@ -231,6 +221,17 @@ function edgePoint(cx: number, cy: number, hw: number, hh: number, tx: number, t
 }
 
 export default function App() {
+	const { t, i18n } = useTranslation()
+	const uiLang = i18n.language === 'en' ? 'en' : 'zh-TW'
+	// kind labels / board-type labels follow the UI language (used on the Konva canvas too)
+	const kindLabel = (c: string): string | undefined =>
+		(KIND_KEYS as readonly string[]).includes(c) ? t(`kind.${c}`) : undefined
+	const typeLabel = (k: string) =>
+		(WB_TYPE_KEYS as readonly string[]).includes(k) ? t(`boardType.${k}.label`) : t('boardType.fallback')
+	const wbTypes = useMemo(
+		() => WB_TYPE_KEYS.map((key) => ({ key, label: t(`boardType.${key}.label`), blurb: t(`boardType.${key}.blurb`) })),
+		[t]
+	)
 	const [room] = useState(resolveRoom)
 	const [lanIp, setLanIp] = useState('')
 	useEffect(() => {
@@ -278,9 +279,9 @@ export default function App() {
 	const transcriptEndRef = useRef<HTMLDivElement | null>(null)
 	const [connectors, setConnectors] = useState<Connector[]>([])
 	const [status, setStatus] = useState('connecting')
-	// 連線狀態的中文呈現(y-websocket 給的是英文 raw status)
-	const statusZh = (s: string) =>
-		s === 'synced' ? '已連線' : s === 'connecting' ? '連線中…' : s === 'connected' ? '同步中…' : s === 'disconnected' ? '斷線,重連中…' : s
+	// 連線狀態的在地化呈現(y-websocket 給的是英文 raw status)
+	const statusLabel = (s: string) =>
+		['synced', 'connecting', 'connected', 'disconnected'].includes(s) ? t(`status.${s}`) : s
 	// 連線卡超過 5 秒 → 顯示說明 banner(典型場景:免費主機冷啟動 / 斷網)
 	const [connSlow, setConnSlow] = useState(false)
 	useEffect(() => {
@@ -385,12 +386,14 @@ export default function App() {
 		})
 	// 設定頁貼的 Groq key(wb-groq-key)也走同一套 BYO header:key 只存這個瀏覽器、
 	// 逐次請求帶上,不進 server 全域 —— 訪客之間不共用、也蓋不掉彼此。三格 BYO 都填時以 BYO 為準。
+	// X-Lang 一律帶上:server 依它決定 AI 輸出語言(en 時附加英文輸出指令、跳過繁化)。
 	const byoHeaders = (): Record<string, string> => {
+		const base: Record<string, string> = { 'X-Lang': apiLang() }
 		if (byo.base.trim() && byo.key.trim() && byo.model.trim())
-			return { 'X-LLM-Base': byo.base.trim(), 'X-LLM-Key': byo.key.trim(), 'X-LLM-Model': byo.model.trim() }
+			return { ...base, 'X-LLM-Base': byo.base.trim(), 'X-LLM-Key': byo.key.trim(), 'X-LLM-Model': byo.model.trim() }
 		const gk = (localStorage.getItem('wb-groq-key') || '').trim()
-		if (gk) return { 'X-LLM-Base': 'https://api.groq.com/openai/v1', 'X-LLM-Key': gk, 'X-LLM-Model': 'openai/gpt-oss-120b' }
-		return {}
+		if (gk) return { ...base, 'X-LLM-Base': 'https://api.groq.com/openai/v1', 'X-LLM-Key': gk, 'X-LLM-Model': 'openai/gpt-oss-120b' }
+		return base
 	}
 	const [sponsor, setSponsor] = useState<{ url?: string; label?: string; notice?: string }>({})
 	const [sponsorHidden, setSponsorHidden] = useState(false)
@@ -415,11 +418,12 @@ export default function App() {
 	const subtitleTimer = useRef<any>(null)
 
 	// presence: my identity (persistent name + colour) + everyone else's cursors
-	const [myName, setMyName] = useState(() => localStorage.getItem('wb-name') || '訪客-' + genCode(3))
-	// prompt for a real name on entry (so people aren't all anonymous '訪客-XXX' in a meeting)
+	const [myName, setMyName] = useState(() => localStorage.getItem('wb-name') || t('nameGate.guestPrefix') + '-' + genCode(3))
+	// prompt for a real name on entry (so people aren't all anonymous '訪客-XXX' / 'Guest-XXX' in a meeting)
+	const isGuestName = (n: string) => /^(訪客|Guest)/.test(n)
 	const [needName, setNeedName] = useState(() => {
 		const n = localStorage.getItem('wb-name')
-		return !n || n.startsWith('訪客')
+		return !n || isGuestName(n)
 	})
 	const [nameDraft, setNameDraft] = useState('')
 	const myColor = useMemo(
@@ -430,7 +434,7 @@ export default function App() {
 	// 「先看看就好」的延後補問:第一次錄音/建卡/開分享(名字的價值此刻才成立)再問一次,只問這一次
 	const nameReasked = useRef(false)
 	function maybeAskName(): boolean {
-		if (!nameReasked.current && myName.startsWith('訪客')) {
+		if (!nameReasked.current && isGuestName(myName)) {
 			nameReasked.current = true
 			setNeedName(true)
 			return true
@@ -512,7 +516,7 @@ export default function App() {
 	const deleteFrame = (fid: string) => {
 		const inside = ([...yShapes.values()] as any[]).filter((s) => s.frameId === fid)
 		const title = frames.find((f) => f.id === fid)?.title || ''
-		if (inside.length && !window.confirm(`刪掉這張圖「${title}」?會一起刪掉裡面的 ${inside.length} 張卡片。`)) return
+		if (inside.length && !window.confirm(t('confirm.deleteFrame', { title, count: inside.length }))) return
 		const ids = new Set(inside.map((s) => s.id))
 		const connIds = ([...yConnectors] as any[]).filter(([, c]) => ids.has(c.from) || ids.has(c.to)).map(([cid]) => cid)
 		tx(() => {
@@ -533,12 +537,13 @@ export default function App() {
 		})
 
 	function exportMd() {
-		window.open(`${SYNC_HTTP}/api/export/${encodeURIComponent(room)}`, '_blank')
+		// lang 目前只給未來擴充用(.md 匯出是確定性轉換,區段標題仍為 zh-TW)
+		window.open(`${SYNC_HTTP}/api/export/${encodeURIComponent(room)}?lang=${apiLang()}`, '_blank')
 	}
 	// a self-contained, styled HTML board record: type-aware AI summary + optional
 	// transcript. Double-click the .html to read it in any browser (no tools needed).
 	async function exportHtml() {
-		setBusy('產生白板紀錄(HTML)…')
+		setBusy(t('busy.htmlExporting'))
 		const esc = (s: string) => (s || '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' } as any)[c])
 		const bold = (s: string) => s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
 		const mdToHtml = (md: string) => {
@@ -572,19 +577,19 @@ export default function App() {
 		try {
 			summaryMd = await fetch(`${SYNC_HTTP}/api/summary/${encodeURIComponent(room)}`, { headers: byoHeaders() }).then((x) => x.text())
 		} catch {
-			summaryMd = '(摘要產生失敗)'
+			summaryMd = t('htmlDoc.summaryFailed')
 		}
 		// embed a snapshot of the whole board (self-contained dataURL, capped at 1200px)
 		let boardImg = ''
 		try {
 			const url = await boardPng(false, 1200)
-			if (url) boardImg = `<section><img class="board" src="${url}" alt="白板全圖"></section>`
+			if (url) boardImg = `<section><img class="board" src="${url}" alt="${t('htmlDoc.boardAlt')}"></section>`
 		} catch {}
 		const tHtml = transcript.length
 			? transcript.map((e: any) => `<div class="t"><span class="m">${esc((e.t || '').slice(11, 16))} ${esc(e.by || '')}</span>${esc(e.text || '')}</div>`).join('')
-			: '<p class="muted">(這場沒有逐字記錄)</p>'
-		const date = new Date().toLocaleString('zh-TW')
-		const html = `<!doctype html><html lang="zh-TW"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>白板紀錄 · ${esc(room)}</title>
+			: `<p class="muted">${t('htmlDoc.noTranscript')}</p>`
+		const date = new Date().toLocaleString(uiLang)
+		const html = `<!doctype html><html lang="${uiLang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${t('htmlDoc.title')} · ${esc(room)}</title>
 <style>
 :root{--ink:#1c1a17;--soft:#6b655c;--line:#e7e1d6;--accent:#b4530a;--bg:#faf7f1}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font-family:'Hanken Grotesk','Noto Sans TC','PingFang TC','Microsoft JhengHei',system-ui,sans-serif;line-height:1.6}
@@ -599,29 +604,29 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 .board{display:block;width:100%;height:auto;border:1px solid var(--line);border-radius:12px;margin:18px 0 6px}
 @media print{body{background:#fff}.wrap{max-width:none}}
 </style></head><body><div class="wrap">
-<header><h1>白板紀錄</h1><div class="sub">房號 ${esc(room)}${boardTopic ? ' · ' + esc(boardTopic) : ''} · ${esc(date)}</div></header>
+<header><h1>${t('htmlDoc.title')}</h1><div class="sub">${t('htmlDoc.room')} ${esc(room)}${boardTopic ? ' · ' + esc(boardTopic) : ''} · ${esc(date)}</div></header>
 ${boardImg}
 <section>${mdToHtml(summaryMd)}</section>
-<section class="transcript"><h2>逐字記錄</h2>${tHtml}</section>
-<footer>由 Mori Canvas 共筆白板產生</footer>
+<section class="transcript"><h2>${t('htmlDoc.transcript')}</h2>${tHtml}</section>
+<footer>${t('htmlDoc.footer')}</footer>
 </div></body></html>`
 		const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
 		const a = document.createElement('a')
 		a.href = URL.createObjectURL(blob)
-		a.download = `白板紀錄-${room}-${new Date().toISOString().slice(0, 10)}.html`
+		a.download = `${t('htmlDoc.fileName')}-${room}-${new Date().toISOString().slice(0, 10)}.html`
 		a.click()
 		setTimeout(() => URL.revokeObjectURL(a.href), 1000)
-		setBusy('已下載白板紀錄(HTML)')
+		setBusy(t('busy.htmlExported'))
 	}
 	function joinRoom() {
 		const c = joinCode.trim().toUpperCase()
 		if (c && c !== room) location.href = `${location.pathname}?room=${encodeURIComponent(c)}`
 	}
 	function tidy() {
-		setBusy('重新排列中…')
+		setBusy(t('busy.tidying'))
 		fetch(`${SYNC_HTTP}/api/rooms/${encodeURIComponent(room)}/tidy`, { method: 'POST' })
-			.then(() => setBusy('已依各圖的板型重新排列'))
-			.catch(() => setBusy('排列失敗'))
+			.then(() => setBusy(t('busy.tidied')))
+			.catch(() => setBusy(t('busy.tidyFailed')))
 	}
 	async function saveSettings(patch: Partial<typeof settings>) {
 		const res = await fetch(`${SYNC_HTTP}/api/settings`, {
@@ -632,7 +637,7 @@ ${boardImg}
 		// 設了 ADMIN_TOKEN 的部署:沒帶正確 X-Admin-Token 一律 401,主機設定改不動
 		if (res?.status === 401) {
 			setSettings((s) => ({ ...s, adminLocked: true }))
-			setBusy('此部署已鎖定主機設定')
+			setBusy(t('settings.hostLocked'))
 			return
 		}
 		const r = await res?.json().catch(() => null)
@@ -728,10 +733,10 @@ ${boardImg}
 	// copy the whole-board PNG to the clipboard (paste straight into chats / docs)
 	async function copyPngToClipboard() {
 		if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') {
-			setBusy('此瀏覽器不支援複製圖片,請改用「下載 PNG」')
+			setBusy(t('busy.pngCopyUnsupported'))
 			return
 		}
-		setBusy('產生整板圖片中…')
+		setBusy(t('busy.pngCopying'))
 		try {
 			// pass a Promise<Blob> so Safari accepts the write inside the user gesture
 			const blobPromise = (async () => {
@@ -740,9 +745,9 @@ ${boardImg}
 				return await (await fetch(url)).blob()
 			})()
 			await navigator.clipboard.write([new ClipboardItem({ 'image/png': blobPromise })])
-			setBusy('已複製整板圖片,直接貼上即可')
+			setBusy(t('busy.pngCopied'))
 		} catch {
-			setBusy(contentBBox() ? '複製失敗(瀏覽器拒絕),請改用「下載 PNG」' : '板上沒有內容,先加幾張卡再複製')
+			setBusy(contentBBox() ? t('busy.pngCopyFailed') : t('busy.emptyBoardCopy'))
 		}
 	}
 	// the Konva stage canvas is transparent (the paper grid is CSS, not drawn).
@@ -785,16 +790,16 @@ ${boardImg}
 			try {
 				data = JSON.parse(await file.text())
 			} catch {
-				setBusy('匯入失敗:檔案不是有效的 JSON')
+				setBusy(t('busy.importBadJson'))
 				return
 			}
 			if (!data || !Array.isArray(data.shapes)) {
-				setBusy('匯入失敗:不是 mori-canvas 畫板檔')
+				setBusy(t('busy.importBadFormat'))
 				return
 			}
-			if (yShapes.size > 0 && !window.confirm('匯入會覆蓋目前畫板的全部內容,還原成這個檔案。確定?')) return
+			if (yShapes.size > 0 && !window.confirm(t('confirm.importOverwrite'))) return
 			applyBoardData(data)
-			setBusy(`已還原畫板:${data.shapes.length} 張卡、${(data.frames || []).length} 張圖`)
+			setBusy(t('busy.imported', { cards: data.shapes.length, frames: (data.frames || []).length }))
 			setExportOpen(false)
 		}
 		// 範例庫:索引懶載入(內建 examples + 社群 templates)+ 載入單一範例(套資料後叫 server 依板型排版)
@@ -812,23 +817,23 @@ ${boardImg}
 		async function loadExample(id: string, dir: 'examples' | 'templates' = 'examples') {
 			const data = await fetch(`${dir}/${id}.json`).then((r) => r.json()).catch(() => null)
 			if (!data || !Array.isArray(data.shapes)) {
-				setBusy('範例載入失敗')
+				setBusy(t('examples.loadFailed'))
 				return
 			}
-			if (yShapes.size > 0 && !window.confirm('載入範例會覆蓋目前畫板的全部內容。確定?')) return
+			if (yShapes.size > 0 && !window.confirm(t('examples.confirmOverwrite'))) return
 			applyBoardData(data)
 			await fetch(`${SYNC_HTTP}/api/rooms/${encodeURIComponent(room)}/tidy`, { method: 'POST' }).catch(() => null)
 			setExamplesOpen(false)
 			setGuide(false)
-			setBusy(`已載入範例:${data.shapes.length} 張卡、${(data.frames || []).length} 張圖`)
+			setBusy(t('examples.loaded', { cards: data.shapes.length, frames: (data.frames || []).length }))
 		}
 		// 範例分享連結:新隨機房號 + board id —— 別人點開,新房自動長出這份範本
 		function copyBoardLink(id: string) {
 			const url = `${location.origin}${location.pathname}?room=${genCode()}&board=${id}`
 			navigator.clipboard
 				?.writeText(url)
-				.then(() => setBusy('已複製分享連結:開新房自動載入這份範本'))
-				.catch(() => window.prompt('複製這條分享連結:', url))
+				.then(() => setBusy(t('examples.linkCopied')))
+				.catch(() => window.prompt(t('examples.copyPrompt'), url))
 		}
 		function pickAndImportBoard() {
 			const inp = document.createElement('input')
@@ -841,14 +846,14 @@ ${boardImg}
 			inp.click()
 		}
 		async function exportPng(transparent: boolean) {
-		setBusy('產生整板 PNG…')
+		setBusy(t('busy.pngExporting'))
 		const url = await boardPng(transparent)
 		if (!url) {
-			setBusy('板上沒有內容,先加幾張卡再匯出')
+			setBusy(t('busy.emptyBoardExport'))
 			return
 		}
 		downloadUri(url)
-		setBusy('已下載整板 PNG')
+		setBusy(t('busy.pngExported'))
 	}
 
 	useEffect(() => {
@@ -908,7 +913,7 @@ ${boardImg}
 		if (!id || boardAutoloadDone.current || status !== 'synced') return
 		boardAutoloadDone.current = true
 		if (yShapes.size > 0 || yFrames.size > 0) {
-			setBusy('此房已有內容,略過範本載入')
+			setBusy(t('board.alreadyHasContent'))
 			return
 		}
 		;(async () => {
@@ -916,13 +921,13 @@ ${boardImg}
 				fetch(`${dir}/${id}.json`).then((r) => (r.ok ? r.json() : null)).catch(() => null)
 			const data = (await get('examples')) || (await get('templates'))
 			if (!data || !Array.isArray(data.shapes)) {
-				setBusy(`找不到範本「${id}」`)
+				setBusy(t('board.templateNotFound', { id }))
 				return
 			}
 			applyBoardData(data)
 			await fetch(`${SYNC_HTTP}/api/rooms/${encodeURIComponent(room)}/tidy`, { method: 'POST' }).catch(() => null)
 			setGuide(false)
-			setBusy(`已載入範本:${data.shapes.length} 張卡、${(data.frames || []).length} 張圖`)
+			setBusy(t('board.templateLoaded', { cards: data.shapes.length, frames: (data.frames || []).length }))
 		})()
 	}, [status])
 
@@ -996,7 +1001,7 @@ ${boardImg}
 				setSettings({ localOnly: r.localOnly, groqKey: r.groqKey, spacing: r.spacing, autoTidy: r.autoTidy, mode: r.mode, sttSource: r.sttSource, whisperUrl: r.whisperUrl || '', adminLocked: !!r.adminLocked })
 				setCaps({ moriEar: r.moriEar, whisperServer: r.whisperServer, groqKey: r.groqKey })
 				setCfgInfo({ llmGroqModel: r.llmGroqModel, llmOllamaModel: r.llmOllamaModel, sttProvider: r.sttProvider, sttGroqModel: r.sttGroqModel, sttLocalModel: r.sttLocalModel })
-				setSponsor({ url: r.sponsorUrl || '', label: r.sponsorLabel || '贊助', notice: r.demoNotice || '' })
+				setSponsor({ url: r.sponsorUrl || '', label: r.sponsorLabel || '', notice: r.demoNotice || '' })
 				// server's runtime Groq key is lost on restart — if this browser stashed one and
 				// the server now reports none, push it back so cloud STT stays unlocked.
 				// 只在主機未鎖時補送(單機 loopback 場景);鎖定部署的 key 走 BYO header 就好
@@ -1019,7 +1024,7 @@ ${boardImg}
 	}, [shareOpen, shareUrl])
 
 	async function endThisRoom() {
-		if (!window.confirm(`結束房間「${room}」?會清空給所有人。`)) return
+		if (!window.confirm(t('confirm.endRoom', { room }))) return
 		await fetch(`${SYNC_HTTP}/api/rooms/${encodeURIComponent(room)}/end`, { method: 'POST' }).catch(() => {})
 	}
 
@@ -1050,15 +1055,15 @@ ${boardImg}
 		}).then((x) => x.json()).catch(() => null)
 		if (r?.ok) {
 			setRoomLocked(!!r.locked)
-			setBusy(r.locked ? '已鎖定:其他人變唯讀,只有你能編輯' : '已解除鎖定:大家都能編輯')
-		} else setBusy(r?.error || '鎖定失敗')
+			setBusy(r.locked ? t('share.locked') : t('share.unlocked'))
+		} else setBusy(r?.error || t('share.lockFailed'))
 	}
 	function copyViewLink() {
 		const url = `${shareUrl}&view=1`
 		navigator.clipboard
 			?.writeText(url)
-			.then(() => setBusy('已複製唯讀連結:打開的人只能看,不能改'))
-			.catch(() => window.prompt('複製這條唯讀連結:', url))
+			.then(() => setBusy(t('share.viewLinkCopied')))
+			.catch(() => window.prompt(t('share.viewLinkPrompt'), url))
 	}
 
 	const byId = (id: string) => shapes.find((s) => s.id === id)
@@ -1205,17 +1210,17 @@ ${boardImg}
 	// label) or normal content (show how many cards it made)
 	function applyAgentResponse(r: any, prefix = '') {
 		if (!r || !r.ok) {
-			setBusy(r?.error ? `錯誤:${r.error}` : '錯誤')
+			setBusy(r?.error ? t('agent.error', { message: r.error }) : t('agent.errorPlain'))
 			return
 		}
 		if (r.intent === 'command') {
 			const c = r.command
 			if (c?.action === 'filter') setFilter({ type: c.by === 'tag' ? 'tag' : 'owner', value: c.value })
 			else if (c?.action === 'clearFilter') setFilter(null)
-			setBusy(`指令:${r.commandLabel || '已執行'}`)
+			setBusy(t('agent.command', { label: r.commandLabel || t('agent.commandDone') }))
 		} else {
 			const fl = r.frameLabel ? `${r.frameLabel} · ` : ''
-			setBusy(`${prefix}${fl}+${r.added?.length ?? r.stickies ?? 0} 張、+${r.connectors ?? 0} 連線`)
+			setBusy(t('agent.added', { prefix: `${prefix}${fl}`, cards: r.added?.length ?? r.stickies ?? 0, connectors: r.connectors ?? 0 }))
 			// 每一輪 content 回應都更新「上一輪 AI 新增」清單(被跳過的段落沒有 ids,不動清單)
 			if (Array.isArray(r.ids)) setLastAiIds(r.ids)
 		}
@@ -1230,7 +1235,7 @@ ${boardImg}
 			})
 		}
 		setLastAiIds([])
-		setBusy(ids.size ? `已移除上一輪 AI 新增的 ${ids.size} 張卡` : '上一輪 AI 新增的卡已不在板上')
+		setBusy(ids.size ? t('agent.undoRemoved', { count: ids.size }) : t('agent.undoGone'))
 	}
 	async function addFrame(type: string, title: string) {
 		await fetch(`${SYNC_HTTP}/api/rooms/${encodeURIComponent(room)}/frames`, {
@@ -1242,7 +1247,7 @@ ${boardImg}
 
 	async function runAgent() {
 		if (!agentText.trim()) return
-		setBusy('agent 思考中…')
+		setBusy(t('agent.thinking'))
 		try {
 			const r = await fetch(`${SYNC_HTTP}/api/agent/${encodeURIComponent(room)}`, {
 				method: 'POST',
@@ -1251,7 +1256,7 @@ ${boardImg}
 			}).then((x) => x.json())
 			applyAgentResponse(r)
 		} catch (e) {
-			setBusy(`錯誤:${(e as Error).message}`)
+			setBusy(t('agent.error', { message: (e as Error).message }))
 		}
 	}
 
@@ -1268,7 +1273,7 @@ ${boardImg}
 			return
 		}
 		if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
-			setBusy('麥克風被瀏覽器擋:要 localhost 或 HTTPS')
+			setBusy(t('mic.blockedShort'))
 			return
 		}
 		let stream: MediaStream
@@ -1286,7 +1291,7 @@ ${boardImg}
 			setCardRecId(null)
 			const type = mr.mimeType || 'audio/webm'
 			const ext = type.includes('mp4') ? 'mp4' : type.includes('ogg') ? 'ogg' : 'webm'
-			setBusy('聽你說…')
+			setBusy(t('card.listening'))
 			try {
 				// AI understands the speech and updates this card's text / tags / owner / kind
 				const r = await fetch(`${SYNC_HTTP}/api/card/${encodeURIComponent(room)}/${encodeURIComponent(id)}?ext=${ext}`, {
@@ -1297,20 +1302,20 @@ ${boardImg}
 				if (r.ok) {
 					showSubtitle(r.transcript)
 					const parts: string[] = []
-					if (r.edit?.text !== undefined) parts.push('文字')
-					if (r.edit?.tags) parts.push('標籤')
-					if (r.edit?.owner !== undefined) parts.push('負責人')
-					if (r.edit?.color) parts.push('分類')
-					setBusy(parts.length ? `已更新這張的 ${parts.join('、')}` : r.transcript ? '沒聽出要改什麼' : '沒聽到內容')
-				} else setBusy(r.error ? `錯誤:${r.error}` : '錯誤')
+					if (r.edit?.text !== undefined) parts.push(t('card.partText'))
+					if (r.edit?.tags) parts.push(t('card.partTags'))
+					if (r.edit?.owner !== undefined) parts.push(t('card.partOwner'))
+					if (r.edit?.color) parts.push(t('card.partKind'))
+					setBusy(parts.length ? t('card.updated', { parts: parts.join(t('card.partsJoin')) }) : r.transcript ? t('card.nothingToChange') : t('card.nothingHeard'))
+				} else setBusy(r.error ? t('agent.error', { message: r.error }) : t('agent.errorPlain'))
 			} catch (e) {
-				setBusy(`錯誤:${(e as Error).message}`)
+				setBusy(t('agent.error', { message: (e as Error).message }))
 			}
 		}
 		cardRecRef.current = mr
 		mr.start()
 		setCardRecId(id)
-		setBusy('講出這張卡的內容…再按一次停止')
+		setBusy(t('card.speakNow'))
 	}
 
 	// continuous "meeting" mode: keep listening, auto-cut a segment on each pause
@@ -1358,13 +1363,10 @@ ${boardImg}
 
 	function micErrorMsg(e: any): string {
 		const n = e?.name || ''
-		if (n === 'NotAllowedError' || n === 'PermissionDeniedError')
-			return '麥克風權限被拒 — 點網址列左邊的鎖頭(或麥克風圖示)改成「允許」,再試一次'
-		if (n === 'NotFoundError' || n === 'DevicesNotFoundError')
-			return '找不到麥克風 — 檢查系統有沒有麥克風、瀏覽器是否選對輸入裝置'
-		if (n === 'NotReadableError' || n === 'TrackStartError')
-			return '麥克風被其他程式佔用 — 關掉其他正在用麥克風的軟體再試'
-		return `麥克風錯誤:${n || e?.message || e}`
+		if (n === 'NotAllowedError' || n === 'PermissionDeniedError') return t('mic.denied')
+		if (n === 'NotFoundError' || n === 'DevicesNotFoundError') return t('mic.notFound')
+		if (n === 'NotReadableError' || n === 'TrackStartError') return t('mic.busy')
+		return t('mic.generic', { detail: n || e?.message || e })
 	}
 
 	function queueSegment(blob: Blob) {
@@ -1380,12 +1382,12 @@ ${boardImg}
 	function failSeg(id: number, blob: Blob, why: string) {
 		failedBlobs.current.set(id, blob)
 		setFailedSegs((a) => (a.includes(id) ? a : [...a, id]))
-		setBusy(`有一段沒送出(${why})— 按「重送」補回,內容沒丟`)
+		setBusy(t('rec.segFailed', { why }))
 	}
 	// 限流暫停:倒數結束自動把佇列裡的段依序補送(間隔 1.2s,避免又撞限流)
 	function schedulePauseResume(wait: number) {
 		clearTimeout(pauseTimer.current)
-		setBusy(`demo 限流 — 錄音照常,${wait} 秒後自動續傳`)
+		setBusy(t('rec.rateLimited', { wait }))
 		pauseTimer.current = setTimeout(async () => {
 			const q = sendQueue.current.splice(0)
 			setPendingSegs((n) => Math.max(0, n - q.length))
@@ -1419,7 +1421,7 @@ ${boardImg}
 				return
 			}
 			if (!r.ok) {
-				failSeg(id, blob, r.error || '伺服器錯誤')
+				failSeg(id, blob, r.error || t('rec.serverError'))
 				return
 			}
 			setSegCount((c) => c + 1)
@@ -1432,7 +1434,7 @@ ${boardImg}
 				// 網路抖一下先自動重試一次
 				setTimeout(() => void sendSegment(id, blob, attempt + 1), 3000)
 			} else {
-				failSeg(id, blob, '網路中斷')
+				failSeg(id, blob, t('rec.networkDown'))
 			}
 		}
 	}
@@ -1452,7 +1454,7 @@ ${boardImg}
 	async function startMeeting() {
 		if (maybeAskName()) return // 補問名字(卡片要標「誰提的」);填完或再按一次就開錄
 		if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
-			setBusy(`麥克風被瀏覽器擋:此頁是 ${location.protocol}//${location.host},要 localhost 或 HTTPS。`)
+			setBusy(t('mic.blockedMeeting', { origin: `${location.protocol}//${location.host}` }))
 			return
 		}
 		let stream: MediaStream
@@ -1466,7 +1468,7 @@ ${boardImg}
 		setSegCount(0)
 		setRecInterrupted(false)
 		void acquireWakeLock() // 錄音中不讓螢幕自動熄(熄屏 = 系統殺錄音)
-		setBusy('會議記錄中…講一段、停頓一下就會自動整理上板')
+		setBusy(t('rec.meetingBusy'))
 
 		const ctx = new AudioContext()
 		const analyser = ctx.createAnalyser()
@@ -1503,7 +1505,7 @@ ${boardImg}
 			try {
 				if (mr && mr.state !== 'inactive') mr.stop() // onstop sends this segment
 			} catch {}
-			setBusy('收到一段,辨識中…')
+			setBusy(t('rec.segmentCut'))
 			if (alive) startSeg()
 		}
 		const iv = setInterval(() => {
@@ -1536,7 +1538,7 @@ ${boardImg}
 			}
 			if (!warnedSilence && now - lastVoice > NO_VOICE_WARN_MS) {
 				warnedSilence = true
-				setBusy('聽不到聲音 — 檢查系統是否選對麥克風(部分筆電要選 Digital Mic 才收得到音)')
+				setBusy(t('rec.noVoice'))
 			}
 			const dur = now - segStart
 			if ((spoke && silentSince && now - silentSince > SILENCE_MS && dur > MIN_MS) || (spoke && dur > MAX_MS)) cut()
@@ -1554,7 +1556,7 @@ ${boardImg}
 				releaseWakeLock()
 				setRecInterrupted(false)
 				setMeeting(false)
-				setBusy('會議記錄結束')
+				setBusy(t('rec.meetingDone'))
 			},
 		}
 		startSeg()
@@ -1570,10 +1572,7 @@ ${boardImg}
 		// Mic needs a SECURE context (https or localhost). A plain http LAN IP like
 		// http://192.168.x.y is blocked by the browser → mediaDevices is undefined.
 		if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
-			setBusy(
-				`麥克風被瀏覽器擋:此頁是 ${location.protocol}//${location.host},不是 localhost 也不是 HTTPS。` +
-					`要錄音的筆電請改開 http://localhost:5174;手機要錄音需要 HTTPS。`
-			)
+			setBusy(t('mic.blockedRecord', { origin: `${location.protocol}//${location.host}` }))
 			return
 		}
 		let stream: MediaStream
@@ -1587,9 +1586,9 @@ ${boardImg}
 		const mr = new MediaRecorder(stream, REC_OPTS)
 		mr.ondataavailable = (ev) => ev.data.size && chunks.push(ev.data)
 		mr.onstop = async () => {
-			stream.getTracks().forEach((t) => t.stop())
+			stream.getTracks().forEach((tr) => tr.stop())
 			setRecording(false)
-			setBusy('轉錄 + agent 中…')
+			setBusy(t('rec.transcribing'))
 			// iOS Safari often records mp4/aac, not webm — use the actual mimeType so
 			// the file extension matches (mori-ear/Groq Whisper accept mp4/m4a/ogg/webm).
 			const type = mr.mimeType || 'audio/webm'
@@ -1602,15 +1601,15 @@ ${boardImg}
 				).then((x) => x.json())
 				showSubtitle(r.transcript)
 				logTranscript(r.transcript)
-				applyAgentResponse(r, r.transcript ? `聽到「${r.transcript}」→ ` : '')
+				applyAgentResponse(r, r.transcript ? t('rec.heardPrefix', { text: r.transcript }) : '')
 			} catch (e) {
-				setBusy(`錯誤:${(e as Error).message}`)
+				setBusy(t('agent.error', { message: (e as Error).message }))
 			}
 		}
 		recRef.current = mr
 		mr.start()
 		setRecording(true)
-		setBusy('錄音中…再按一次停止')
+		setBusy(t('rec.recordingOnce'))
 	}
 
 	const mobile = size.w < 700
@@ -1658,8 +1657,8 @@ ${boardImg}
 				<div className="scrim" style={{ zIndex: 3800 }}>
 					<div className="dialog-card modal-in" style={{ width: 'min(380px, 92vw)', textAlign: 'center' }}>
 						<div style={{ fontFamily: 'Fraunces, serif', fontSize: 26, lineHeight: 1, marginBottom: 8, color: 'var(--accent)' }}>Mori Canvas</div>
-						<div style={{ fontWeight: 700, fontSize: 18 }}>歡迎加入會議</div>
-						<div className="muted" style={{ fontSize: 13, margin: '6px 0 16px' }}>打個名字,白板上的卡片與游標才標得出是你</div>
+						<div style={{ fontWeight: 700, fontSize: 18 }}>{t('nameGate.welcome')}</div>
+						<div className="muted" style={{ fontSize: 13, margin: '6px 0 16px' }}>{t('nameGate.why')}</div>
 						<input
 							autoFocus
 							value={nameDraft}
@@ -1670,7 +1669,7 @@ ${boardImg}
 									setNeedName(false)
 								}
 							}}
-							placeholder="你的名字"
+							placeholder={t('nameGate.placeholder')}
 							style={{ width: '100%', fontSize: 16, padding: '10px 12px', textAlign: 'center' }}
 						/>
 						<button
@@ -1682,7 +1681,7 @@ ${boardImg}
 								setNeedName(false)
 							}}
 						>
-							進入會議
+							{t('nameGate.enter')}
 						</button>
 						<button
 							style={{ width: '100%', marginTop: 8, padding: '9px', fontSize: 13, background: 'transparent', border: 'none', color: 'var(--ink-soft)', cursor: 'pointer', textDecoration: 'underline' }}
@@ -1691,7 +1690,7 @@ ${boardImg}
 								setNeedName(false)
 							}}
 						>
-							先看看就好
+							{t('nameGate.justLook')}
 						</button>
 					</div>
 				</div>
@@ -1716,30 +1715,30 @@ ${boardImg}
 						className="glass modal-in"
 						style={{ background: 'var(--surface)', width: 'min(440px, 92vw)', maxHeight: '88vh', overflowY: 'auto', padding: '26px 24px 20px', borderRadius: 20 }}
 					>
-						<div className="code" style={{ fontSize: 30, color: 'var(--ink)' }}>共筆白板</div>
-						<div style={{ color: 'var(--ink-soft)', fontSize: 14, margin: '2px 0 18px' }}>開會時邊講,AI 幫你把重點整理成白板</div>
+						<div className="code" style={{ fontSize: 30, color: 'var(--ink)' }}>{t('guide.title')}</div>
+						<div style={{ color: 'var(--ink-soft)', fontSize: 14, margin: '2px 0 18px' }}>{t('guide.subtitle')}</div>
 						{(
 							[
-								['開始開會', '按左下「● 開始會議記錄」,正常講話 —— 停頓一下,AI 就把那段重點整理成便利貼。也可把逐字稿貼進面板按「丟給 agent」。'],
-								['用講的下指令', '錄音中直接說「幫我排一下」「只看亞澤的」「把這張指給小明」「改成決議」,AI 會分辨那是指令、自動幫你執行,不用去找按鈕。'],
-							['顏色 = 類型', '__LEGEND__'],
-								['自己調整', '雙擊空白新增便利貼、雙擊卡片改字、拖拉移動;點一張卡可改色或刪除;「連線」把兩張卡的關係連起來。'],
-								['拉人一起', '右上「分享 / QR」—— 同事掃 QR 或輸入房號就進來,大家即時一起編輯。'],
-								['收尾', '按「匯出 / 輸出」→ 白板摘要,AI 依目前圖表類型產出一頁紀錄。'],
+								[t('guide.step1Title'), t('guide.step1Body')],
+								[t('guide.step2Title'), t('guide.step2Body')],
+								[t('guide.step3Title'), '__LEGEND__'],
+								[t('guide.step4Title'), t('guide.step4Body')],
+								[t('guide.step5Title'), t('guide.step5Body')],
+								[t('guide.step6Title'), t('guide.step6Body')],
 							] as [string, string][]
-						).map(([t, d], i) => (
+						).map(([title, d], i) => (
 							<div key={i} style={{ display: 'flex', gap: 12, marginBottom: 14 }}>
 								<div style={{ flex: '0 0 24px', height: 24, borderRadius: '50%', background: 'var(--accent)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 600 }}>
 									{i + 1}
 								</div>
 								<div style={{ flex: 1 }}>
-									<div style={{ fontWeight: 600, fontSize: 14, marginBottom: 3 }}>{t}</div>
+									<div style={{ fontWeight: 600, fontSize: 14, marginBottom: 3 }}>{title}</div>
 									{d === '__LEGEND__' ? (
 										<div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', fontSize: 13, color: 'var(--ink-soft)' }}>
 											{KIND_ORDER.map((c) => (
 												<span key={c} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
 													<span style={{ width: 13, height: 13, borderRadius: 4, background: COLORS[c], display: 'inline-block' }} />
-													{KIND_LABEL[c]}
+													{kindLabel(c)}
 												</span>
 											))}
 										</div>
@@ -1751,7 +1750,7 @@ ${boardImg}
 						))}
 						<div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
 							<button style={{ flex: 1, padding: '9px' }} onClick={() => openExamples()}>
-								看範例庫
+								{t('guide.openExamples')}
 							</button>
 							<button
 								style={{ flex: 1, padding: '9px' }}
@@ -1761,7 +1760,7 @@ ${boardImg}
 									setTourStep(0)
 								}}
 							>
-								跑一次導覽
+								{t('guide.runTour')}
 							</button>
 						</div>
 						<button
@@ -1773,7 +1772,7 @@ ${boardImg}
 								if (first && !localStorage.getItem('wb-tour-done')) setTourStep(0)
 							}}
 						>
-							開始使用
+							{t('guide.start')}
 						</button>
 					</div>
 				</div>
@@ -1790,11 +1789,17 @@ ${boardImg}
 						style={{ background: 'var(--surface)', width: 'min(560px, 94vw)', maxHeight: '86vh', overflowY: 'auto', padding: '24px 22px 18px', borderRadius: 20 }}
 						onClick={(e) => e.stopPropagation()}
 					>
-						<div className="code" style={{ fontSize: 24, color: 'var(--ink)' }}>範例庫</div>
+						<div className="code" style={{ fontSize: 24, color: 'var(--ink)' }}>{t('examples.title')}</div>
 						<div style={{ color: 'var(--ink-soft)', fontSize: 13, margin: '2px 0 14px' }}>
-							載入一份完整範例,看 AI 整理出來長什麼樣;展開「講法示範」可以照著講一遍,長出自己的板。
+							{t('examples.subtitle')}
 						</div>
-						{!exampleIndex.length && <div className="muted" style={{ fontSize: 13 }}>載入範例清單中…</div>}
+						{/* 範例是「內容」不是 UI,保持繁中;en 介面加一行說明 */}
+						{t('examples.zhNote') && (
+							<div className="muted" style={{ fontSize: 12, margin: '0 0 12px', border: '1px solid var(--line)', borderRadius: 10, padding: '7px 10px' }}>
+								{t('examples.zhNote')}
+							</div>
+						)}
+						{!exampleIndex.length && <div className="muted" style={{ fontSize: 13 }}>{t('examples.loadingIndex')}</div>}
 						{(() => {
 							// 內建範例與社群範本共用同一張卡片(只差載入來源目錄)
 							const boardCard = (ex: any, dir: 'examples' | 'templates') => (
@@ -1813,16 +1818,16 @@ ${boardImg}
 										</div>
 										<div style={{ flex: '0 0 auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
 											<button className="btn-accent" style={{ padding: '7px 16px' }} onClick={() => loadExample(ex.id, dir)}>
-												載入
+												{t('examples.load')}
 											</button>
-											<button style={{ padding: '5px 10px', fontSize: 11.5 }} title="複製含新房號的連結,別人點開就在新房自動長出這份範本" onClick={() => copyBoardLink(ex.id)}>
-												複製分享連結
+											<button style={{ padding: '5px 10px', fontSize: 11.5 }} title={t('examples.copyLinkTitle')} onClick={() => copyBoardLink(ex.id)}>
+												{t('examples.copyLink')}
 											</button>
 										</div>
 									</div>
 									{(ex.sampleUtterances || []).length > 0 && (
 										<details style={{ marginTop: 8 }}>
-											<summary style={{ cursor: 'pointer', fontSize: 12, color: 'var(--accent)' }}>講法示範:開會這樣講,AI 就會長出這張板</summary>
+											<summary style={{ cursor: 'pointer', fontSize: 12, color: 'var(--accent)' }}>{t('examples.utterances')}</summary>
 											<ul style={{ margin: '6px 0 0', paddingLeft: 18, fontSize: 12.5, color: 'var(--ink-soft)', lineHeight: 1.7 }}>
 												{ex.sampleUtterances.map((u: string, i: number) => (
 													<li key={i}>「{u}」</li>
@@ -1837,9 +1842,12 @@ ${boardImg}
 									{exampleIndex.map((ex: any) => boardCard(ex, 'examples'))}
 									{templateIndex.length > 0 && (
 										<>
-											<div className="code" style={{ fontSize: 17, color: 'var(--ink)', margin: '14px 0 2px' }}>社群範本</div>
+											<div className="code" style={{ fontSize: 17, color: 'var(--ink)', margin: '14px 0 2px' }}>{t('examples.community')}</div>
 											<div style={{ color: 'var(--ink-soft)', fontSize: 12, margin: '0 0 10px' }}>
-												社群投稿的範本(<a href="https://github.com/yazelin/mori-canvas/blob/main/client/public/templates/README.md" target="_blank" rel="noreferrer" style={{ color: 'var(--accent)' }}>投稿規範</a>)。
+												<Trans
+													i18nKey="examples.communityNote"
+													components={[<a key="0" href="https://github.com/yazelin/mori-canvas/blob/main/client/public/templates/README.md" target="_blank" rel="noreferrer" style={{ color: 'var(--accent)' }} />]}
+												/>
 											</div>
 											{templateIndex.map((ex: any) => boardCard(ex, 'templates'))}
 										</>
@@ -1847,7 +1855,7 @@ ${boardImg}
 								</>
 							)
 						})()}
-						<div className="muted" style={{ fontSize: 11.5 }}>載入會覆蓋目前畫板(覆蓋前會先確認);想保留現況可先「匯出 → 畫板存檔」。</div>
+						<div className="muted" style={{ fontSize: 11.5 }}>{t('examples.overwriteNote')}</div>
 					</div>
 				</div>
 			)}
@@ -1890,20 +1898,20 @@ ${boardImg}
 								onClick={(e) => e.stopPropagation()}
 							>
 								<div style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>
-									{steps[i].title}
+									{t(`tour.${steps[i].key}.title`)}
 									<span className="muted" style={{ fontWeight: 400, fontSize: 11.5, marginLeft: 8 }}>{i + 1} / {steps.length}</span>
 								</div>
-								<div style={{ fontSize: 13, color: 'var(--ink-soft)', lineHeight: 1.6 }}>{steps[i].body}</div>
+								<div style={{ fontSize: 13, color: 'var(--ink-soft)', lineHeight: 1.6 }}>{t(`tour.${steps[i].key}.body`)}</div>
 								<div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-									<button style={{ padding: '6px 12px', fontSize: 12.5 }} onClick={done}>跳過</button>
+									<button style={{ padding: '6px 12px', fontSize: 12.5 }} onClick={done}>{t('tour.skip')}</button>
 									<span style={{ flex: 1 }} />
 									{i > 0 && (
-										<button style={{ padding: '6px 12px', fontSize: 12.5 }} onClick={() => setTourStep(i - 1)}>上一步</button>
+										<button style={{ padding: '6px 12px', fontSize: 12.5 }} onClick={() => setTourStep(i - 1)}>{t('tour.prev')}</button>
 									)}
 									{i < steps.length - 1 ? (
-										<button className="btn-accent" style={{ padding: '6px 14px', fontSize: 12.5 }} onClick={() => setTourStep(i + 1)}>下一步</button>
+										<button className="btn-accent" style={{ padding: '6px 14px', fontSize: 12.5 }} onClick={() => setTourStep(i + 1)}>{t('tour.next')}</button>
 									) : (
-										<button className="btn-accent" style={{ padding: '6px 14px', fontSize: 12.5 }} onClick={done}>完成</button>
+										<button className="btn-accent" style={{ padding: '6px 14px', fontSize: 12.5 }} onClick={done}>{t('tour.done')}</button>
 									)}
 								</div>
 							</div>
@@ -2122,8 +2130,8 @@ ${boardImg}
 								/>
 								{/* kind accent dot + 類型小標(只在會議板語意下顯示,其他板型同色另有意義) */}
 								<Circle x={18} y={18} radius={5} fill={kindAccent(s.color)} opacity={0.8} listening={false} {...PERF} />
-								{!(s as any).note && isMeetingFrame(s.frameId) && KIND_LABEL[s.color] && (
-									<Text x={28} y={12} text={KIND_LABEL[s.color]} fontSize={10} fontStyle="600" fontFamily={CANVAS_FONT} fill={kindAccent(s.color)} opacity={0.85} listening={false} {...PERF} />
+								{!(s as any).note && isMeetingFrame(s.frameId) && kindLabel(s.color) && (
+									<Text x={28} y={12} text={kindLabel(s.color)} fontSize={10} fontStyle="600" fontFamily={CANVAS_FONT} fill={kindAccent(s.color)} opacity={0.85} listening={false} {...PERF} />
 								)}
 								{/* editor number (fallback handle: "把 N 號…") — not on notes */}
 								{!(s as any).note && cardNum[s.id] && (
@@ -2146,7 +2154,7 @@ ${boardImg}
 								/>
 								{/* content tags (top row) — click to filter by tag */}
 								{(() => {
-									let tx = !(s as any).note && isMeetingFrame(s.frameId) && KIND_LABEL[s.color] ? 56 : 32
+									let tx = !(s as any).note && isMeetingFrame(s.frameId) && kindLabel(s.color) ? 56 : 32
 									return (s.tags || []).slice(0, 2).map((t, i) => {
 										const w = t.length * 11 + 12
 										const x = tx
@@ -2212,34 +2220,34 @@ ${boardImg}
 						gap: 8,
 					}}
 				>
-					<div className="code" style={{ fontSize: 38, color: 'var(--ink)', opacity: 0.9 }}>共筆白板</div>
-					<div style={{ fontSize: 15, color: 'var(--ink-soft)' }}>按左下「● 開始會議記錄」,邊講邊整理上板</div>
+					<div className="code" style={{ fontSize: 38, color: 'var(--ink)', opacity: 0.9 }}>{t('empty.title')}</div>
+					<div style={{ fontSize: 15, color: 'var(--ink-soft)' }}>{t('empty.line1')}</div>
 					<div style={{ fontSize: 13, color: 'var(--ink-soft)', opacity: 0.75 }}>
-						或雙擊空白新增便利貼 · 右上「分享 / QR」拉人進來
+						{t('empty.line2')}
 					</div>
 					<button className="btn-soft" style={{ pointerEvents: 'auto', marginTop: 6, padding: '8px 18px', fontSize: 13 }} onClick={() => openExamples()}>
-						不知道從哪開始?載入一份範例看看
+						{t('empty.loadExample')}
 					</button>
 					<button
 						className="btn-soft"
 						style={{ pointerEvents: 'auto', padding: '8px 18px', fontSize: 13 }}
 						onClick={async () => {
 							// 不用麥克風也不用打字:把內建示範逐字稿餵給 agent,看卡片自己長出來
-							if (busy.startsWith('agent')) return // 防連點重複送
-							setBusy('agent 思考中…(示範逐字稿整理上板,約十幾秒)')
+							if (busy === t('agent.demoThinking') || busy === t('agent.thinking')) return // 防連點重複送
+							setBusy(t('agent.demoThinking'))
 							try {
 								const r = await fetch(`${SYNC_HTTP}/api/agent/${encodeURIComponent(room)}`, {
 									method: 'POST',
 									headers: { 'Content-Type': 'application/json', ...byoHeaders() },
-									body: JSON.stringify({ transcript: DEMO_TRANSCRIPT, by: me.name }),
+									body: JSON.stringify({ transcript: t('demo.transcript'), by: me.name }),
 								}).then((x) => x.json())
-								applyAgentResponse(r, '示範:')
+								applyAgentResponse(r, t('agent.demoPrefix'))
 							} catch (e) {
-								setBusy(`錯誤:${(e as Error).message}`)
+								setBusy(t('agent.error', { message: (e as Error).message }))
 							}
 						}}
 					>
-						用示範逐字稿試試(免麥克風)
+						{t('empty.tryDemo')}
 					</button>
 				</div>
 			)}
@@ -2332,36 +2340,36 @@ ${boardImg}
 				<>
 					<div className="glass float-in" style={{ position: 'fixed', top: 'calc(8px + env(safe-area-inset-top, 0px))', left: 'calc(8px + env(safe-area-inset-left, 0px))', right: 'calc(8px + env(safe-area-inset-right, 0px))', zIndex: 1000, display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', fontSize: 13 }}>
 						<span className="code" style={{ fontSize: 17, color: 'var(--accent)' }}>{room}</span>
-						{meeting && <span className="rec-dot live" title="會議記錄中" style={{ marginRight: 0 }} />}
-						<button className="btn-accent" style={{ padding: '5px 11px' }} data-tour="share" onClick={() => { maybeAskName(); setShareOpen(true) }}>分享</button>
+						{meeting && <span className="rec-dot live" title={t('topbar.recordingTitle')} style={{ marginRight: 0 }} />}
+						<button className="btn-accent" style={{ padding: '5px 11px' }} data-tour="share" onClick={() => { maybeAskName(); setShareOpen(true) }}>{t('topbar.shareShort')}</button>
 						<span style={{ flex: 1 }} />
-						<span className="muted" style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{statusZh(status)}·{shapes.length}</span>
-						<button style={btn} title="更多" onClick={() => setMenuOpen((v) => !v)}>⋯</button>
+						<span className="muted" style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{statusLabel(status)}·{shapes.length}</span>
+						<button style={btn} title={t('topbar.more')} onClick={() => setMenuOpen((v) => !v)}>⋯</button>
 					</div>
 					{menuOpen && (
 						<div className="glass float-in" style={{ position: 'fixed', top: 'calc(54px + env(safe-area-inset-top, 0px))', right: 'calc(8px + env(safe-area-inset-right, 0px))', zIndex: 2100, display: 'flex', flexDirection: 'column', gap: 5, padding: 8, minWidth: 156 }} onClick={() => setMenuOpen(false)}>
 							{canInstall && (
-								<button className="btn-accent" onClick={(e) => { e.stopPropagation(); doInstall() }}>安裝 App / 加到主畫面</button>
+								<button className="btn-accent" onClick={(e) => { e.stopPropagation(); doInstall() }}>{t('menu.install')}</button>
 							)}
-							<button className="btn-soft" onClick={() => setExportOpen(true)}>匯出 / 白板紀錄</button>
-							<button onClick={() => setSettingsOpen(true)}>⚙ 設定</button>
-							<button onClick={() => toggleTheme()}>{theme === 'dark' ? '☀ 亮色主題' : '☾ 暗色主題'}</button>
-							<button onClick={() => setView({ x: 0, y: 0, scale: 1 })}>回正視圖</button>
-							<button onClick={() => openExamples()}>範例庫</button>
-							<button onClick={() => setGuide(true)}>? 使用說明</button>
-							<button className="btn-danger" onClick={() => { if (window.confirm('清空整個房間給所有人?')) clearAll() }}>清空房間</button>
+							<button className="btn-soft" onClick={() => setExportOpen(true)}>{t('menu.export')}</button>
+							<button onClick={() => setSettingsOpen(true)}>{t('menu.settings')}</button>
+							<button onClick={() => toggleTheme()}>{theme === 'dark' ? t('menu.themeLight') : t('menu.themeDark')}</button>
+							<button onClick={() => setView({ x: 0, y: 0, scale: 1 })}>{t('menu.resetView')}</button>
+							<button onClick={() => openExamples()}>{t('menu.examples')}</button>
+							<button onClick={() => setGuide(true)}>{t('menu.help')}</button>
+							<button className="btn-danger" onClick={() => { if (window.confirm(t('confirm.clearRoom'))) clearAll() }}>{t('menu.clear')}</button>
 						</div>
 					)}
 				</>
 			) : (
 				<div className="glass float-in" style={bar}>
-					<span className="muted" style={{ fontSize: 12 }}>房號</span>
+					<span className="muted" style={{ fontSize: 12 }}>{t('topbar.room')}</span>
 					<span className="code" style={{ fontSize: 19, color: 'var(--accent)', marginRight: 2 }}>{room}</span>
-					{meeting && <span className="rec-dot live" title="會議記錄中" style={{ marginRight: 0 }} />}
-					{READ_ONLY && <span className="muted" style={{ fontSize: 12, border: '1px solid var(--line)', borderRadius: 999, padding: '1px 9px' }}>唯讀檢視</span>}
-					<button title="分享這間會議室:QR、房號、邀請連結" className="btn-accent" data-tour="share" onClick={() => { maybeAskName(); setShareOpen(true) }}>分享 / QR</button>
-					<span className="muted" style={{ fontSize: 12 }} title={status === 'synced' ? '已即時連線' : statusZh(status)}>
-						{statusZh(status)} · {shapes.length} 張
+					{meeting && <span className="rec-dot live" title={t('topbar.recordingTitle')} style={{ marginRight: 0 }} />}
+					{READ_ONLY && <span className="muted" style={{ fontSize: 12, border: '1px solid var(--line)', borderRadius: 999, padding: '1px 9px' }}>{t('topbar.readOnly')}</span>}
+					<button title={t('topbar.shareTitle')} className="btn-accent" data-tour="share" onClick={() => { maybeAskName(); setShareOpen(true) }}>{t('topbar.share')}</button>
+					<span className="muted" style={{ fontSize: 12 }} title={status === 'synced' ? t('topbar.liveTitle') : statusLabel(status)}>
+						{statusLabel(status)} · {t('topbar.cards', { count: shapes.length })}
 					</span>
 				</div>
 			)}
@@ -2372,7 +2380,7 @@ ${boardImg}
 					className="glass"
 					style={{ position: 'fixed', top: 58, left: 0, right: 0, marginInline: 'auto', width: 'fit-content', maxWidth: '92vw', zIndex: 1001, padding: '8px 16px', fontSize: 13, display: 'flex', gap: 10, alignItems: 'center', border: '1px solid var(--live)' }}
 				>
-					<span style={{ color: 'var(--live)', fontWeight: 600 }}>錄音被中斷(系統收回了麥克風)</span>
+					<span style={{ color: 'var(--live)', fontWeight: 600 }}>{t('rec.interrupted')}</span>
 					<button
 						className="btn-accent"
 						style={{ padding: '4px 14px', fontSize: 12.5 }}
@@ -2382,7 +2390,7 @@ ${boardImg}
 							void startMeeting()
 						}}
 					>
-						點此恢復錄音
+						{t('rec.resume')}
 					</button>
 				</div>
 			)}
@@ -2393,9 +2401,7 @@ ${boardImg}
 					className="glass"
 					style={{ position: 'fixed', top: 58, left: 0, right: 0, marginInline: 'auto', width: 'fit-content', maxWidth: '92vw', zIndex: 999, padding: '6px 16px', fontSize: 12.5, color: 'var(--ink-soft)' }}
 				>
-					{status === 'disconnected'
-						? '已斷線,正在重連 — 放心,這段期間的編輯會在連回後自動同步'
-						: '主機喚醒中…(免費示範站閒置會休眠,第一次連上約需 30 秒)'}
+					{status === 'disconnected' ? t('conn.disconnected') : t('conn.coldStart')}
 				</div>
 			)}
 
@@ -2416,42 +2422,42 @@ ${boardImg}
 								focusHit(searchIdx + (e.shiftKey ? -1 : 1))
 							}
 						}}
-						placeholder="搜尋卡片:文字 / 負責人 / 標籤"
+						placeholder={t('search.placeholder')}
 						style={{ width: mobile ? 150 : 210, fontSize: 13, padding: '5px 9px' }}
 					/>
 					<span className="muted" style={{ fontSize: 12, whiteSpace: 'nowrap', minWidth: 60, textAlign: 'center' }}>
-						{searchHits.length ? `第 ${Math.min(searchIdx, searchHits.length - 1) + 1} / ${searchHits.length} 筆` : searchQ.trim() ? '沒有符合' : ''}
+						{searchHits.length ? t('search.hits', { current: Math.min(searchIdx, searchHits.length - 1) + 1, total: searchHits.length }) : searchQ.trim() ? t('search.noHits') : ''}
 					</span>
-					<button style={{ padding: '3px 9px' }} title="上一筆(Shift+Enter)" disabled={!searchHits.length} onClick={() => focusHit(searchIdx - 1)}>↑</button>
-					<button style={{ padding: '3px 9px' }} title="下一筆(Enter)" disabled={!searchHits.length} onClick={() => focusHit(searchIdx + 1)}>↓</button>
-					<button style={{ padding: '3px 9px' }} title="關閉(Esc)" onClick={closeSearch}>✕</button>
+					<button style={{ padding: '3px 9px' }} title={t('search.prevTitle')} disabled={!searchHits.length} onClick={() => focusHit(searchIdx - 1)}>↑</button>
+					<button style={{ padding: '3px 9px' }} title={t('search.nextTitle')} disabled={!searchHits.length} onClick={() => focusHit(searchIdx + 1)}>↓</button>
+					<button style={{ padding: '3px 9px' }} title={t('search.closeTitle')} onClick={closeSearch}>✕</button>
 				</div>
 			)}
 
 			{/* canvas tools (left strip, Photoshop-style) */}
 			{!READ_ONLY && (<div className="toolstrip float-in">
-				<button className="tool" title="新增一張空白便利貼(也可雙擊白板空白處)" onClick={() => addSticky(140, 140, '', 'yellow') && undefined}><Ico><path d="M16 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h9l6-6V5a2 2 0 0 0-2-2Z"/><path d="M14 21v-5a1 1 0 0 1 1-1h5"/></Ico>便利貼</button>
-				<button className="tool" title="新增一張備註。任何圖表都能貼;自動排列與 AI 都不會動它。" style={{ background: COLORS.note, borderColor: KIND_ACCENT.note, color: '#4a3a6e' }} onClick={() => addNote(180, 180) && undefined}><Ico><path d="M3 11.5V5a2 2 0 0 1 2-2h6.5a2 2 0 0 1 1.4.6l7.5 7.5a2 2 0 0 1 0 2.8l-6.6 6.6a2 2 0 0 1-2.8 0L3.6 12.9A2 2 0 0 1 3 11.5Z"/><circle cx="7.5" cy="7.5" r="1.1" fill="currentColor" stroke="none"/></Ico>備註</button>
-				<button className="tool" title="手動新增一張圖(AI 也會在切新主題時自動開)" onClick={() => setTypePickerOpen(true)}><Ico><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M12 8v8M8 12h8"/></Ico>新圖{frames.length ? `·${frames.length}` : ''}</button>
+				<button className="tool" title={t('tools.stickyTitle')} onClick={() => addSticky(140, 140, '', 'yellow') && undefined}><Ico><path d="M16 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h9l6-6V5a2 2 0 0 0-2-2Z"/><path d="M14 21v-5a1 1 0 0 1 1-1h5"/></Ico>{t('tools.sticky')}</button>
+				<button className="tool" title={t('tools.noteTitle')} style={{ background: COLORS.note, borderColor: KIND_ACCENT.note, color: '#4a3a6e' }} onClick={() => addNote(180, 180) && undefined}><Ico><path d="M3 11.5V5a2 2 0 0 1 2-2h6.5a2 2 0 0 1 1.4.6l7.5 7.5a2 2 0 0 1 0 2.8l-6.6 6.6a2 2 0 0 1-2.8 0L3.6 12.9A2 2 0 0 1 3 11.5Z"/><circle cx="7.5" cy="7.5" r="1.1" fill="currentColor" stroke="none"/></Ico>{t('tools.note')}</button>
+				<button className="tool" title={t('tools.newFrameTitle')} onClick={() => setTypePickerOpen(true)}><Ico><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M12 8v8M8 12h8"/></Ico>{t('tools.newFrame')}{frames.length ? `·${frames.length}` : ''}</button>
 				<div className="tool-divider" />
-				<button className={`tool${connectMode ? ' on' : ''}`} title="開啟後依序點兩張便利貼,畫一條關係箭頭" onClick={() => { setConnectMode((v) => !v); setConnectFrom(null) }}><Ico><path d="M9 17H7A5 5 0 0 1 7 7h2"/><path d="M15 7h2a5 5 0 0 1 0 10h-2"/><line x1="8" y1="12" x2="16" y2="12"/></Ico>{connectMode ? '點兩張' : '連線'}</button>
-				<button className="tool" title="把每張圖依它的板型重新排整齊" onClick={tidy}><Ico><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></Ico>排列</button>
+				<button className={`tool${connectMode ? ' on' : ''}`} title={t('tools.connectTitle')} onClick={() => { setConnectMode((v) => !v); setConnectFrom(null) }}><Ico><path d="M9 17H7A5 5 0 0 1 7 7h2"/><path d="M15 7h2a5 5 0 0 1 0 10h-2"/><line x1="8" y1="12" x2="16" y2="12"/></Ico>{connectMode ? t('tools.connectPending') : t('tools.connect')}</button>
+				<button className="tool" title={t('tools.tidyTitle')} onClick={tidy}><Ico><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></Ico>{t('tools.tidy')}</button>
 				<div className="tool-divider" />
-				<button className="tool" title="復原 Ctrl+Z" onClick={() => undoMgr.undo()}><Ico><path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 5 5 5 5 0 0 1-5 5h-4"/></Ico>復原</button>
-				<button className="tool" title="重做 Ctrl+Shift+Z" onClick={() => undoMgr.redo()}><Ico><path d="m15 14 5-5-5-5"/><path d="M20 9H9a5 5 0 0 0-5 5 5 5 0 0 0 5 5h4"/></Ico>重做</button>
-				<button className="tool" disabled={!selectedId && !selectedConnId} title="刪除選取的便利貼或連線(Delete)" onClick={() => { if (selectedId) deleteSticky(selectedId); else if (selectedConnId) deleteConnector(selectedConnId) }}><Ico><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></Ico>刪除</button>
+				<button className="tool" title={t('tools.undoTitle')} onClick={() => undoMgr.undo()}><Ico><path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 5 5 5 5 0 0 1-5 5h-4"/></Ico>{t('tools.undo')}</button>
+				<button className="tool" title={t('tools.redoTitle')} onClick={() => undoMgr.redo()}><Ico><path d="m15 14 5-5-5-5"/><path d="M20 9H9a5 5 0 0 0-5 5 5 5 0 0 0 5 5h4"/></Ico>{t('tools.redo')}</button>
+				<button className="tool" disabled={!selectedId && !selectedConnId} title={t('tools.deleteTitle')} onClick={() => { if (selectedId) deleteSticky(selectedId); else if (selectedConnId) deleteConnector(selectedConnId) }}><Ico><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></Ico>{t('tools.delete')}</button>
 			</div>)}
 
 			{/* app / view (top-right) — desktop only; on mobile these live in the ⋯ menu */}
 			{!mobile && (
 				<div className="glass float-in" style={appbar}>
-					<button title="匯出 / 輸出:白板摘要、Markdown、PNG、畫板存檔(可還原)" className="btn-soft" data-tour="export" onClick={() => setExportOpen(true)}>匯出</button>
-					<button style={btn} title="設定:AI 雲端/本機、排列間距、自動重排" onClick={() => setSettingsOpen(true)}>⚙</button>
-					<button style={btn} title={theme === 'dark' ? '切換亮色主題' : '切換暗色主題'} onClick={toggleTheme}>{theme === 'dark' ? '☀' : '☾'}</button>
-					<button style={btn} title="視圖回到原點與原始縮放" onClick={() => setView({ x: 0, y: 0, scale: 1 })}>回正</button>
-					<button className="btn-danger" title="清空整個房間(會清掉所有人的板,請小心)" onClick={() => { if (window.confirm('清空整個房間給所有人?')) clearAll() }}>清空</button>
-					<button style={btn} title="範例庫:載入完整示範畫板 + 講法示範" onClick={() => openExamples()}>範例</button>
-					<button style={btn} title="使用說明 / 新手引導" data-tour="help" onClick={() => setGuide(true)}>?</button>
+					<button title={t('appbar.exportTitle')} className="btn-soft" data-tour="export" onClick={() => setExportOpen(true)}>{t('appbar.export')}</button>
+					<button style={btn} title={t('appbar.settingsTitle')} onClick={() => setSettingsOpen(true)}>⚙</button>
+					<button style={btn} title={theme === 'dark' ? t('appbar.toLight') : t('appbar.toDark')} onClick={toggleTheme}>{theme === 'dark' ? '☀' : '☾'}</button>
+					<button style={btn} title={t('appbar.resetViewTitle')} onClick={() => setView({ x: 0, y: 0, scale: 1 })}>{t('appbar.resetView')}</button>
+					<button className="btn-danger" title={t('appbar.clearTitle')} onClick={() => { if (window.confirm(t('confirm.clearRoom'))) clearAll() }}>{t('appbar.clear')}</button>
+					<button style={btn} title={t('appbar.examplesTitle')} onClick={() => openExamples()}>{t('appbar.examples')}</button>
+					<button style={btn} title={t('appbar.helpTitle')} data-tour="help" onClick={() => setGuide(true)}>?</button>
 				</div>
 			)}
 
@@ -2468,14 +2474,14 @@ ${boardImg}
 						<div className="glass float-in" style={{ position: 'fixed', left, top, zIndex: 1500, display: 'flex', flexDirection: 'column', gap: 7, alignItems: 'stretch', padding: 10, width: 'min(260px, calc(100vw - 16px))', boxSizing: 'border-box' }}>
 								<div style={{ display: 'flex', gap: 9, alignItems: 'center', justifyContent: 'center' }}>
 									{KIND_ORDER.map((c) => (
-										<button key={c} title={KIND_LABEL[c]} onClick={() => patchShape(selectedId, { color: c })} style={{ width: 26, height: 26, padding: 0, borderRadius: '50%', background: COLORS[c], border: s.color === c ? '2px solid var(--ink)' : '2px solid var(--surface)', boxShadow: '0 1px 3px rgba(28,26,23,0.25)' }} />
+										<button key={c} title={kindLabel(c)} onClick={() => patchShape(selectedId, { color: c })} style={{ width: 26, height: 26, padding: 0, borderRadius: '50%', background: COLORS[c], border: s.color === c ? '2px solid var(--ink)' : '2px solid var(--surface)', boxShadow: '0 1px 3px rgba(28,26,23,0.25)' }} />
 									))}
 								</div>
-								<input placeholder="負責人" value={s.owner || ''} onChange={(e) => patchShape(selectedId, { owner: e.target.value.slice(0, 12) })} style={{ width: '100%', fontSize: 12, padding: '7px 9px', boxSizing: 'border-box' }} />
-								<input placeholder="標籤(用空格分隔)" value={(s.tags || []).join(' ')} onChange={(e) => patchShape(selectedId, { tags: e.target.value.split(/[\s,]+/).filter(Boolean).slice(0, 3) })} style={{ width: '100%', fontSize: 12, padding: '7px 9px', boxSizing: 'border-box' }} />
+								<input placeholder={t('popover.ownerPlaceholder')} value={s.owner || ''} onChange={(e) => patchShape(selectedId, { owner: e.target.value.slice(0, 12) })} style={{ width: '100%', fontSize: 12, padding: '7px 9px', boxSizing: 'border-box' }} />
+								<input placeholder={t('popover.tagsPlaceholder')} value={(s.tags || []).join(' ')} onChange={(e) => patchShape(selectedId, { tags: e.target.value.split(/[\s,]+/).filter(Boolean).slice(0, 3) })} style={{ width: '100%', fontSize: 12, padding: '7px 9px', boxSizing: 'border-box' }} />
 								<div style={{ display: 'flex', gap: 8 }}>
-									<button title="用語音改這張卡的內容/標籤/負責人(再按一次停止)" className={`btn-soft${cardRecId === selectedId ? ' live' : ''}`} style={{ flex: 1, ...(cardRecId === selectedId ? { background: 'var(--live)', color: '#fff', borderColor: 'var(--live)' } : {}) }} onClick={() => dictateCard(selectedId)}>{cardRecId === selectedId ? '■ 停止' : '● 語音'}</button>
-									<button title="刪除這張 (Delete)" className="btn-danger" style={{ flex: 1 }} onClick={() => { deleteSticky(selectedId); setSelectedId(null) }}>刪除</button>
+									<button title={t('popover.dictateTitle')} className={`btn-soft${cardRecId === selectedId ? ' live' : ''}`} style={{ flex: 1, ...(cardRecId === selectedId ? { background: 'var(--live)', color: '#fff', borderColor: 'var(--live)' } : {}) }} onClick={() => dictateCard(selectedId)}>{cardRecId === selectedId ? t('popover.dictateStop') : t('popover.dictate')}</button>
+									<button title={t('popover.deleteTitle')} className="btn-danger" style={{ flex: 1 }} onClick={() => { deleteSticky(selectedId); setSelectedId(null) }}>{t('popover.delete')}</button>
 								</div>
 							</div>
 					)
@@ -2487,9 +2493,9 @@ ${boardImg}
 					className="glass float-in"
 					style={{ position: 'fixed', bottom: 40, left: 0, right: 0, marginInline: 'auto', width: 'fit-content', zIndex: 1400, display: 'flex', gap: 8, alignItems: 'center', padding: '6px 12px', fontSize: 13 }}
 				>
-					<span>只看 {filter.type === 'tag' ? '#' + filter.value : filter.value}</span>
+					<span>{t('filter.showing', { value: filter.type === 'tag' ? '#' + filter.value : filter.value })}</span>
 					<button style={{ padding: '3px 9px' }} onClick={() => setFilter(null)}>
-						顯示全部 ✕
+						{t('filter.showAll')}
 					</button>
 				</div>
 			)}
@@ -2501,28 +2507,28 @@ ${boardImg}
 					style={{ position: 'fixed', inset: 0, zIndex: 3500, background: 'var(--scrim)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
 				>
 					<div className="glass modal-in" onClick={(e) => e.stopPropagation()} style={{ background: 'var(--surface)', width: 'min(420px, 92vw)', maxHeight: '88vh', overflowY: 'auto', padding: 22, borderRadius: 18 }}>
-						<div style={{ fontWeight: 700, fontSize: 16 }}>新增一張圖</div>
+						<div style={{ fontWeight: 700, fontSize: 16 }}>{t('typePicker.title')}</div>
 						<div style={{ fontSize: 12, color: 'var(--ink-soft)', margin: '4px 0 12px' }}>
-							一個會議可以有多張圖。開會切到新主題時 AI 會自動開對應的圖;這裡可手動加一張並選圖型。
+							{t('typePicker.subtitle')}
 						</div>
 						<input
 							value={newFrameTitle}
 							onChange={(e) => setNewFrameTitle(e.target.value.slice(0, 40))}
-							placeholder="圖的標題(選填,例:出貨流程)"
+							placeholder={t('typePicker.titlePlaceholder')}
 							style={{ width: '100%', fontSize: 13, padding: '7px 9px', border: '1px solid var(--line)', borderRadius: 8, marginBottom: 12, boxSizing: 'border-box' }}
 						/>
-						{WB_TYPES.map((t) => (
+						{wbTypes.map((ty) => (
 							<button
-								key={t.key}
+								key={ty.key}
 								onClick={() => {
-									addFrame(t.key, newFrameTitle)
+									addFrame(ty.key, newFrameTitle)
 									setNewFrameTitle('')
 									setTypePickerOpen(false)
 								}}
 								style={{ display: 'block', width: '100%', textAlign: 'left', marginBottom: 8, padding: '10px 12px', background: 'var(--surface-soft)', borderColor: 'var(--line)' }}
 							>
-								<div style={{ fontWeight: 600, fontSize: 14, color: 'var(--ink)' }}>{t.label}</div>
-								<div style={{ fontSize: 12, color: 'var(--ink-soft)' }}>{t.blurb}</div>
+								<div style={{ fontWeight: 600, fontSize: 14, color: 'var(--ink)' }}>{ty.label}</div>
+								<div style={{ fontSize: 12, color: 'var(--ink-soft)' }}>{ty.blurb}</div>
 							</button>
 						))}
 					</div>
@@ -2536,12 +2542,12 @@ ${boardImg}
 					style={{ position: 'fixed', inset: 0, zIndex: 3600, background: 'var(--scrim)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
 				>
 					<div className="glass modal-in" onClick={(e) => e.stopPropagation()} style={{ background: 'var(--surface)', width: 'min(440px, 92vw)', maxHeight: '88vh', overflowY: 'auto', padding: 22, borderRadius: 18 }}>
-						<div style={{ fontWeight: 700, fontSize: 16 }}>設定</div>
-						<div style={{ fontSize: 12, color: 'var(--ink-soft)', margin: '4px 0 16px' }}>即時生效、不寫死。</div>
+						<div style={{ fontWeight: 700, fontSize: 16 }}>{t('settings.title')}</div>
+						<div style={{ fontSize: 12, color: 'var(--ink-soft)', margin: '4px 0 16px' }}>{t('settings.subtitle')}</div>
 
 						{settings.adminLocked && (
 							<div style={{ fontSize: 12, color: 'var(--accent)', background: 'var(--accent-soft)', border: '1px solid var(--accent)', borderRadius: 10, padding: '8px 10px', marginBottom: 14, lineHeight: 1.6 }}>
-								此部署已鎖定主機設定(處理方式 / 語音來源 / 本機模式等僅站長可改)。「用你自己的 AI」與下方貼 Groq key 不受影響 —— key 只存你瀏覽器、走你自己的額度。
+								{t('settings.adminLocked')}
 							</div>
 						)}
 
@@ -2549,65 +2555,76 @@ ${boardImg}
 							const ON = { background: 'var(--accent-soft)', borderColor: 'var(--accent)', color: 'var(--accent)' }
 							return (
 								<>
-									<div style={{ fontWeight: 600, fontSize: 14, marginBottom: 6 }}>處理方式</div>
+									<div style={{ fontWeight: 600, fontSize: 14, marginBottom: 6 }}>{t('settings.language')}</div>
+									<div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
+										{(
+											[
+												['zh-TW', '繁體中文'],
+												['en', 'English'],
+											] as ['zh-TW' | 'en', string][]
+										).map(([code, label]) => (
+											<button key={code} onClick={() => setLang(code)} style={{ flex: 1, ...(uiLang === code ? ON : {}) }}>
+												{label}
+											</button>
+										))}
+									</div>
+									<div style={{ fontSize: 12, color: 'var(--ink-soft)', marginBottom: 18 }}>{t('settings.languageNote')}</div>
+
+									<div style={{ fontWeight: 600, fontSize: 14, marginBottom: 6 }}>{t('settings.mode')}</div>
 									<div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
 										<button disabled={!caps.moriEar} onClick={() => saveSettings({ mode: 'mori' })} style={{ flex: 1, ...(settings.mode === 'mori' ? ON : {}) }}>
-											Mori 處理{!caps.moriEar ? '(未裝)' : ''}
+											{t('settings.modeMori')}{!caps.moriEar ? t('settings.modeMoriMissing') : ''}
 										</button>
 										<button onClick={() => saveSettings({ mode: 'custom' })} style={{ flex: 1, ...(settings.mode === 'custom' ? ON : {}) }}>
-											自訂
+											{t('settings.modeCustom')}
 										</button>
 									</div>
 									<div style={{ fontSize: 12, color: 'var(--ink-soft)', marginBottom: settings.mode === 'custom' ? 10 : 18 }}>
-										{settings.mode === 'mori'
-											? '用 mori-ear 處理語音(本機 whisper / Groq 由 ear 自己決定);AI 整理走共用 config。'
-											: '本軟體自己處理、不需要 mori-ear。語音與文字理解各自選雲端或本機;自訂模式會先做靜音剪(避免靜音幻覺)。'}
+										{settings.mode === 'mori' ? t('settings.modeMoriDesc') : t('settings.modeCustomDesc')}
 									</div>
 
 									{settings.mode === 'custom' && (
 										<div style={{ border: '1px solid var(--line)', borderRadius: 12, padding: 12, marginBottom: 18 }}>
 											<div style={{ marginBottom: 12 }}>
-												<div style={{ fontWeight: 600, fontSize: 13, marginBottom: 4 }}>Groq API Key {caps.groqKey ? '✓ 已啟用' : groqKeyInput.trim() ? '✓ 已啟用(此瀏覽器)' : '（雲端 AI 需要）'}</div>
+												<div style={{ fontWeight: 600, fontSize: 13, marginBottom: 4 }}>Groq API Key {caps.groqKey ? t('settings.groqKeyOn') : groqKeyInput.trim() ? t('settings.groqKeyOnBrowser') : t('settings.groqKeyNeeded')}</div>
 												<div className="muted" style={{ fontSize: 11, marginBottom: 6, lineHeight: 1.6 }}>
-													貼上你的 Groq key（console.groq.com/keys）:只存在你瀏覽器,AI 畫卡/摘要逐次請求帶上、走你自己的額度,訪客之間不共用。
-													{settings.adminLocked
-														? '注意:語音辨識(STT)仍走站長的 STT 設定,你的 key 不會用於語音辨識。'
-														: '單機自用時 key 會同步給本機 server,雲端語音辨識也能用。'}
+													{t('settings.groqKeyDesc')}
+													{settings.adminLocked ? t('settings.groqKeyLockedNote') : t('settings.groqKeyLocalNote')}
 												</div>
 												<input type="password" value={groqKeyInput} placeholder="gsk_..." onChange={(e) => setGroqKeyInput(e.target.value)} onBlur={() => saveGroqKey(groqKeyInput.trim())} style={{ width: '100%', fontSize: 12 }} />
 											</div>
-											<div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>語音轉文字(Whisper)</div>
+											<div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>{t('settings.stt')}</div>
 											<div style={{ display: 'flex', gap: 8, marginBottom: 4 }}>
 												<button disabled={!caps.groqKey} onClick={() => saveSettings({ sttSource: 'cloud' })} style={{ flex: 1, ...(settings.sttSource === 'cloud' ? ON : {}) }}>
-													雲端 Groq{!caps.groqKey ? '(無 key)' : ''}
+													{t('settings.sttCloud')}{!caps.groqKey ? t('settings.sttCloudNoKey') : ''}
 												</button>
 												<button onClick={() => saveSettings({ sttSource: 'local' })} style={{ flex: 1, ...(settings.sttSource === 'local' ? ON : {}) }}>
-													本機 whisper
+													{t('settings.sttLocal')}
 												</button>
 											</div>
 											<div style={{ fontSize: 11.5, color: 'var(--ink-soft)', marginBottom: 8, lineHeight: 1.6 }}>
 												{settings.sttSource === 'local'
 													? caps.whisperServer
-														? '打你本機的 whisper-server（/inference）。沒裝的話跑 scripts/setup-whisper-linux.sh(自動偵測 GPU/CPU 編譯)。'
-														: '⚠ 沒偵測到本機 whisper-server。跑 scripts/setup-whisper-linux.sh 安裝,或下方填你自己的網址。'
-													: '用你自己的 Groq API key 打 Groq Whisper(零安裝)。'}
+														? t('settings.sttLocalDesc')
+														: t('settings.sttLocalMissing')
+													: t('settings.sttCloudDesc')}
 											</div>
 											{settings.sttSource === 'local' && (
 												<input
 													value={settings.whisperUrl}
 													onChange={(e) => setSettings((s) => ({ ...s, whisperUrl: e.target.value }))}
 													onBlur={(e) => saveSettings({ whisperUrl: e.target.value })}
-													placeholder="whisper-server 網址(留空=自動偵測,例 http://127.0.0.1:8089/inference)"
+													placeholder={t('settings.whisperUrlPlaceholder')}
 													style={{ width: '100%', fontSize: 12, padding: '6px 8px', border: '1px solid var(--line)', borderRadius: 8, boxSizing: 'border-box', marginBottom: 12 }}
 												/>
 											)}
-											<div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>文字理解(LLM)</div>
+											<div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>{t('settings.llm')}</div>
 											<div style={{ display: 'flex', gap: 8 }}>
 												<button disabled={!caps.groqKey} onClick={() => saveSettings({ localOnly: false })} style={{ flex: 1, ...(!settings.localOnly ? ON : {}) }}>
-													雲端 Groq
+													{t('settings.llmCloud')}
 												</button>
 												<button onClick={() => saveSettings({ localOnly: true })} style={{ flex: 1, ...(settings.localOnly ? ON : {}) }}>
-													本機 Ollama
+													{t('settings.llmLocal')}
 												</button>
 											</div>
 										</div>
@@ -2616,28 +2633,28 @@ ${boardImg}
 							)
 						})()}
 
-						<div style={{ fontWeight: 600, fontSize: 14, marginBottom: 6 }}>語音轉文字(Whisper)與模型</div>
+						<div style={{ fontWeight: 600, fontSize: 14, marginBottom: 6 }}>{t('settings.earSection')}</div>
 						<div style={{ fontSize: 12, color: 'var(--ink-soft)', lineHeight: 1.6, marginBottom: 8 }}>
-							STT 由 <b>mori-ear</b> 處理,下列設定在<b>共用的 ~/.mori/config.json</b>(整個 Mori 宇宙共用,改了會影響其他工具;mori-ear 每次轉錄都會重讀,不用重啟本服務)。
+							<Trans i18nKey="settings.earDesc" />
 						</div>
 						<div style={{ fontSize: 12.5, background: 'rgba(28,26,23,0.04)', border: '1px solid var(--line)', borderRadius: 10, padding: '10px 12px', lineHeight: 1.8, marginBottom: 18 }}>
-							<div>· <b>STT 來源</b> <code>stt_provider</code> = <b>{cfgInfo.sttProvider || '?'}</b>(groq=雲端 Whisper / local=本機 / auto)</div>
-							<div>· <b>雲端 Whisper 模型</b> <code>providers.groq.stt_model</code> = {cfgInfo.sttGroqModel || '?'}</div>
-							<div>· <b>本機 Whisper 模型</b> <code>whisper-local.model_path</code>:</div>
+							<div>· <b>{t('settings.earSttSource')}</b> <code>stt_provider</code> = <b>{cfgInfo.sttProvider || '?'}</b>{t('settings.earSttSourceNote')}</div>
+							<div>· <b>{t('settings.earCloudModel')}</b> <code>providers.groq.stt_model</code> = {cfgInfo.sttGroqModel || '?'}</div>
+							<div>· <b>{t('settings.earLocalModel')}</b> <code>whisper-local.model_path</code>:</div>
 							<div style={{ wordBreak: 'break-all', paddingLeft: 14, color: 'var(--ink)' }}>{cfgInfo.sttLocalModel || '?'}</div>
-							<div style={{ color: 'var(--ink-soft)', paddingLeft: 14 }}>(small=小模型較快、large-v3-turbo=大模型較準;GPU/CPU 看 whisper-server 是哪個 build,跟模型無關)</div>
+							<div style={{ color: 'var(--ink-soft)', paddingLeft: 14 }}>{t('settings.earModelNote')}</div>
 							<hr style={{ border: 0, borderTop: '1px solid var(--line)', margin: '8px 0' }} />
-							<div>· <b>AI 整理模型</b> 雲端 <code>providers.groq.model</code> = {cfgInfo.llmGroqModel || '?'}</div>
-							<div>· 本機 <code>providers.ollama.model</code> = {cfgInfo.llmOllamaModel || '?'}</div>
+							<div>· <b>{t('settings.earLlmModel')}</b> {t('settings.earLlmCloud')} <code>providers.groq.model</code> = {cfgInfo.llmGroqModel || '?'}</div>
+							<div>· {t('settings.earLlmLocal')} <code>providers.ollama.model</code> = {cfgInfo.llmOllamaModel || '?'}</div>
 						</div>
 
-						<div style={{ fontWeight: 600, fontSize: 14, marginBottom: 6 }}>自動排列間距</div>
+						<div style={{ fontWeight: 600, fontSize: 14, marginBottom: 6 }}>{t('settings.spacing')}</div>
 						<div style={{ display: 'flex', gap: 8, marginBottom: 18 }}>
 							{(
 								[
-									['緊湊', 0.7],
-									['標準', 1],
-									['寬鬆', 1.4],
+									[t('settings.spacingTight'), 0.7],
+									[t('settings.spacingNormal'), 1],
+									[t('settings.spacingLoose'), 1.4],
 								] as [string, number][]
 							).map(([label, v]) => (
 								<button
@@ -2652,20 +2669,20 @@ ${boardImg}
 
 						<label style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 18, cursor: 'pointer', fontSize: 13 }}>
 							<input type="checkbox" checked={settings.autoTidy} onChange={(e) => saveSettings({ autoTidy: e.target.checked })} />
-							AI 加完內容後自動重排(關掉的話卡片留原地,要自己按「自動排列」)
+							{t('settings.autoTidy')}
 						</label>
 
 						<div style={{ borderTop: '1px solid var(--line)', margin: '14px 0 10px', paddingTop: 12 }}>
-							<div style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>用你自己的 AI(選填)</div>
-							<div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>填了就用你自己的額度,不耗站長的。任何 OpenAI 相容服務都行(OpenAI / Groq / Gemini / Azure / OpenRouter / 本機 Ollama);三格都填才生效,留空就用站長預設。</div>
-							<input value={byo.base} onChange={(e) => saveByo({ base: e.target.value })} placeholder="API Base URL,例 https://api.openai.com/v1" style={{ width: '100%', fontSize: 12, marginBottom: 6 }} />
-							<input value={byo.key} onChange={(e) => saveByo({ key: e.target.value })} type="password" placeholder="API Key(只存你瀏覽器,逐次請求帶上)" style={{ width: '100%', fontSize: 12, marginBottom: 6 }} />
-							<input value={byo.model} onChange={(e) => saveByo({ model: e.target.value })} placeholder="Model,例 gpt-4o-mini / gemini-2.0-flash" style={{ width: '100%', fontSize: 12 }} />
-							<div className="muted" style={{ fontSize: 11, marginTop: 6 }}>{byo.base.trim() && byo.key.trim() && byo.model.trim() ? '✓ 已啟用你自己的 AI' : '目前用站長預設的 AI'}</div>
+							<div style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>{t('settings.byo')}</div>
+							<div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>{t('settings.byoDesc')}</div>
+							<input value={byo.base} onChange={(e) => saveByo({ base: e.target.value })} placeholder={t('settings.byoBasePlaceholder')} style={{ width: '100%', fontSize: 12, marginBottom: 6 }} />
+							<input value={byo.key} onChange={(e) => saveByo({ key: e.target.value })} type="password" placeholder={t('settings.byoKeyPlaceholder')} style={{ width: '100%', fontSize: 12, marginBottom: 6 }} />
+							<input value={byo.model} onChange={(e) => saveByo({ model: e.target.value })} placeholder={t('settings.byoModelPlaceholder')} style={{ width: '100%', fontSize: 12 }} />
+							<div className="muted" style={{ fontSize: 11, marginTop: 6 }}>{byo.base.trim() && byo.key.trim() && byo.model.trim() ? t('settings.byoOn') : t('settings.byoOff')}</div>
 						</div>
 
 						<button style={{ width: '100%' }} onClick={() => setSettingsOpen(false)}>
-							關閉
+							{t('settings.close')}
 						</button>
 					</div>
 				</div>
@@ -2678,33 +2695,34 @@ ${boardImg}
 					style={{ position: 'fixed', inset: 0, zIndex: 3600, background: 'var(--scrim)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
 				>
 					<div className="glass modal-in" onClick={(e) => e.stopPropagation()} style={{ background: 'var(--surface)', width: 'min(420px, 92vw)', padding: 22, borderRadius: 18 }}>
-						<div style={{ fontWeight: 700, fontSize: 16 }}>匯出 / 輸出</div>
-						<div style={{ fontSize: 12, color: 'var(--ink-soft)', margin: '4px 0 16px' }}>「畫板存檔」可完整還原;其餘是快照輸出(不能還原)。</div>
+						<div style={{ fontWeight: 700, fontSize: 16 }}>{t('export.title')}</div>
+						<div style={{ fontSize: 12, color: 'var(--ink-soft)', margin: '4px 0 16px' }}>{t('export.subtitle')}</div>
 						<div style={{ border: '1px solid var(--line)', borderRadius: 12, padding: '11px 12px', marginBottom: 12, background: 'rgba(124,58,237,0.06)' }}>
-							<div style={{ fontWeight: 600, fontSize: 14 }}>畫板存檔(可還原)</div>
-							<div style={{ fontSize: 12, color: 'var(--ink-soft)', marginBottom: 8 }}>存成 .json,完整保留卡片/連線/圖框,匯入即還原。也可把檔案傳給別人匯入接著討論、再回傳。</div>
+							<div style={{ fontWeight: 600, fontSize: 14 }}>{t('export.boardFile')}</div>
+							<div style={{ fontSize: 12, color: 'var(--ink-soft)', marginBottom: 8 }}>{t('export.boardFileDesc')}</div>
 							<div style={{ display: 'flex', gap: 8 }}>
 								<button className="btn-primary" style={{ flex: 1 }}
-									onClick={() => { exportBoard(); setExportOpen(false) }}>下載畫板檔</button>
-								<button style={{ flex: 1 }} onClick={() => pickAndImportBoard()}>匯入還原…</button>
+									onClick={() => { exportBoard(); setExportOpen(false) }}>{t('export.downloadBoard')}</button>
+								<button style={{ flex: 1 }} onClick={() => pickAndImportBoard()}>{t('export.importRestore')}</button>
 							</div>
 						</div>
 						<button
 							style={{ display: 'block', width: '100%', textAlign: 'left', marginBottom: 8, padding: '11px 12px' }}
 							onClick={() => {
-								window.open(`${SYNC_HTTP}/api/summary/${encodeURIComponent(room)}`, '_blank')
+								// window.open 帶不了 header,摘要的語言用 ?lang= 傳給 server
+								window.open(`${SYNC_HTTP}/api/summary/${encodeURIComponent(room)}?lang=${apiLang()}`, '_blank')
 								setExportOpen(false)
 							}}
 						>
-							<div style={{ fontWeight: 600, fontSize: 14 }}>白板摘要</div>
-							<div style={{ fontSize: 12, color: 'var(--ink-soft)' }}>AI 依各圖表類型整理成一頁紀錄(另開頁面)</div>
+							<div style={{ fontWeight: 600, fontSize: 14 }}>{t('export.summary')}</div>
+							<div style={{ fontSize: 12, color: 'var(--ink-soft)' }}>{t('export.summaryDesc')}</div>
 						</button>
 						<button
 							style={{ display: 'block', width: '100%', textAlign: 'left', marginBottom: 8, padding: '11px 12px' }}
 							onClick={() => { exportHtml(); setExportOpen(false) }}
 						>
-							<div style={{ fontWeight: 600, fontSize: 14 }}>白板紀錄 (HTML) · 含板圖與逐字稿</div>
-							<div style={{ fontSize: 12, color: 'var(--ink-soft)' }}>下載 .html —— 整板快照圖 + 摘要 + 逐字稿,離線雙擊就能看</div>
+							<div style={{ fontWeight: 600, fontSize: 14 }}>{t('export.html')}</div>
+							<div style={{ fontSize: 12, color: 'var(--ink-soft)' }}>{t('export.htmlDesc')}</div>
 						</button>
 						<button
 							style={{ display: 'block', width: '100%', textAlign: 'left', marginBottom: 8, padding: '11px 12px' }}
@@ -2713,18 +2731,18 @@ ${boardImg}
 								setExportOpen(false)
 							}}
 						>
-							<div style={{ fontWeight: 600, fontSize: 14 }}>白板紀錄 (Markdown)</div>
-							<div style={{ fontSize: 12, color: 'var(--ink-soft)' }}>下載 .md —— 每張圖一個區段</div>
+							<div style={{ fontWeight: 600, fontSize: 14 }}>{t('export.md')}</div>
+							<div style={{ fontSize: 12, color: 'var(--ink-soft)' }}>{t('export.mdDesc')}</div>
 						</button>
 						<div style={{ border: '1px solid var(--line)', borderRadius: 12, padding: '11px 12px', marginBottom: 12 }}>
-							<div style={{ fontWeight: 600, fontSize: 14 }}>白板圖片 (PNG) · 整板</div>
-							<div style={{ fontSize: 12, color: 'var(--ink-soft)', marginTop: 2 }}>輸出完整板面(含畫面外的卡片),紙底顏色跟著目前主題</div>
+							<div style={{ fontWeight: 600, fontSize: 14 }}>{t('export.png')}</div>
+							<div style={{ fontSize: 12, color: 'var(--ink-soft)', marginTop: 2 }}>{t('export.pngDesc')}</div>
 							<div style={{ display: 'flex', gap: 16, margin: '8px 0', fontSize: 13 }}>
 								<label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, cursor: 'pointer' }}>
-									<input type="radio" checked={!pngTransparent} onChange={() => setPngTransparent(false)} /> 紙底(依主題)
+									<input type="radio" checked={!pngTransparent} onChange={() => setPngTransparent(false)} /> {t('export.pngPaper')}
 								</label>
 								<label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, cursor: 'pointer' }}>
-									<input type="radio" checked={pngTransparent} onChange={() => setPngTransparent(true)} /> 透明底
+									<input type="radio" checked={pngTransparent} onChange={() => setPngTransparent(true)} /> {t('export.pngTransparent')}
 								</label>
 							</div>
 							<div style={{ display: 'flex', gap: 8 }}>
@@ -2735,22 +2753,22 @@ ${boardImg}
 										setExportOpen(false)
 									}}
 								>
-									下載 PNG
+									{t('export.downloadPng')}
 								</button>
 								<button
 									style={{ flex: 1 }}
-									title="把整板 PNG 放進剪貼簿,到聊天軟體 / 文件直接貼上"
+									title={t('export.copyPngTitle')}
 									onClick={() => {
 										void copyPngToClipboard()
 										setExportOpen(false)
 									}}
 								>
-									複製到剪貼簿
+									{t('export.copyPng')}
 								</button>
 							</div>
 						</div>
 						<button style={{ width: '100%' }} onClick={() => setExportOpen(false)}>
-							關閉
+							{t('export.close')}
 						</button>
 					</div>
 				</div>
@@ -2785,7 +2803,7 @@ ${boardImg}
 			{/* hint (desktop only) */}
 			{!mobile && (
 				<div style={hint}>
-					雙擊空白新增 · 雙擊改字 · 拖拉移動 · 點便利貼/連線後 Delete 刪除 · Ctrl+Z 復原 · 空白拖曳平移 · 滾輪縮放
+					{t('hint.desktop')}
 				</div>
 			)}
 
@@ -2793,11 +2811,11 @@ ${boardImg}
 				{iosInstallHint && (
 					<div className="scrim" style={{ zIndex: 4000 }} onClick={() => setIosInstallHint(false)}>
 						<div className="dialog-card modal-in" onClick={(e) => e.stopPropagation()} style={{ width: 'min(360px, 92vw)', textAlign: 'center' }}>
-							<div style={{ fontWeight: 700, fontSize: 17, marginBottom: 10 }}>加到主畫面</div>
+							<div style={{ fontWeight: 700, fontSize: 17, marginBottom: 10 }}>{t('install.iosTitle')}</div>
 							<div className="muted" style={{ fontSize: 13.5, lineHeight: 1.7, marginBottom: 16 }}>
-								在 Safari 點下方的「分享」<br />→ 往下找「加入主畫面」<br />→ 加入,就有全螢幕 App 圖示。
+								<Trans i18nKey="install.iosBody" />
 							</div>
-							<button className="btn-accent" style={{ width: '100%' }} onClick={() => setIosInstallHint(false)}>知道了</button>
+							<button className="btn-accent" style={{ width: '100%' }} onClick={() => setIosInstallHint(false)}>{t('install.gotIt')}</button>
 						</div>
 					</div>
 				)}
@@ -2806,10 +2824,10 @@ ${boardImg}
 						{sponsor.notice && <span className="muted" style={{ lineHeight: 1.35 }}>{sponsor.notice}</span>}
 						{sponsor.url && (
 							<a href={sponsor.url} target="_blank" rel="noreferrer" style={{ flex: '0 0 auto' }}>
-								<button className="btn-accent" style={{ padding: '5px 11px' }}>{sponsor.label || '贊助'}</button>
+								<button className="btn-accent" style={{ padding: '5px 11px' }}>{sponsor.label || t('sponsor.label')}</button>
 							</a>
 						)}
-						<button title="關閉" style={{ flex: '0 0 auto', padding: '3px 8px' }} onClick={() => setSponsorHidden(true)}>✕</button>
+						<button title={t('sponsor.closeTitle')} style={{ flex: '0 0 auto', padding: '3px 8px' }} onClick={() => setSponsorHidden(true)}>✕</button>
 					</div>
 				)}
 
@@ -2819,33 +2837,33 @@ ${boardImg}
 					onClick={() => setPanelOpen((o) => !o)}
 					style={{ fontWeight: 600, cursor: 'pointer', userSelect: 'none' }}
 				>
-					{panelOpen ? '▾' : '▸'} 開會記錄
+					{panelOpen ? '▾' : '▸'} {t('panel.title')}
 				</div>
 				{/* voice = the main way to get content onto the board */}
 				<button
 					className={`btn-rec${meeting ? ' live' : ''}`}
 					data-tour="record"
 						style={{ width: '100%', marginTop: 8, fontSize: 15, padding: '13px', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-					title="連續錄音:邊講邊整理,停頓會自動斷句上板;再按一次停止"
+					title={t('panel.recordTitle')}
 					onClick={() => (meeting ? stopMeeting() : startMeeting())}
 				>
-					<span className="rec-dot" />{meeting ? `錄音中 · 已整理 ${segCount} 段　點此停止` : '開始會議記錄'}
+					<span className="rec-dot" />{meeting ? t('panel.recording', { count: segCount }) : t('panel.record')}
 					{meeting && <VolBars level={meterRef} />}
 				</button>
 				{(pendingSegs > 0 || failedSegs.length > 0) && (
 					<div style={{ display: 'flex', gap: 6, marginTop: 6, fontSize: 12, alignItems: 'center', flexWrap: 'wrap' }}>
 						{pendingSegs > 0 && (
 							<span className="muted" style={{ border: '1px solid var(--line)', borderRadius: 999, padding: '2px 10px' }}>
-								處理中 {pendingSegs} 段…
+								{t('panel.pending', { count: pendingSegs })}
 							</span>
 						)}
 						{failedSegs.length > 0 && (
 							<button
 								style={{ border: '1px solid var(--live)', color: 'var(--live)', background: 'transparent', borderRadius: 999, padding: '2px 10px', fontSize: 12, cursor: 'pointer' }}
-								title="這些段落的錄音還留著,點一下重新送出"
+								title={t('panel.failedRetryTitle')}
 								onClick={() => void retryFailedSegs()}
 							>
-								{failedSegs.length} 段沒送出 · 重送
+								{t('panel.failedRetry', { count: failedSegs.length })}
 							</button>
 						)}
 					</div>
@@ -2854,16 +2872,16 @@ ${boardImg}
 					<>
 						<button
 							style={{ ...btn, width: '100%', marginTop: 6, fontSize: 12, ...(recording ? { background: 'var(--live)', color: '#fff', borderColor: 'var(--live)' } : {}) }}
-							title="只錄一段:按開始、講話、再按停止"
+							title={t('panel.onceTitle')}
 							onClick={toggleRecord}
 							disabled={meeting}
 						>
-							{recording ? '■ 停止' : '單次錄一段'}
+							{recording ? t('panel.onceStop') : t('panel.once')}
 						</button>
 						{/* manual transcript = secondary, hidden until you ask for it */}
 						<div style={{ marginTop: 8, fontSize: 12 }}>
 							<span onClick={() => setShowPaste((v) => !v)} style={{ cursor: 'pointer', color: 'var(--accent)' }}>
-								{showPaste ? '收起貼逐字稿' : '或:貼現成的逐字稿 ▸'}
+								{showPaste ? t('panel.hidePaste') : t('panel.showPaste')}
 							</span>
 						</div>
 						{showPaste && (
@@ -2871,11 +2889,11 @@ ${boardImg}
 								<textarea
 									value={agentText}
 									onChange={(e) => setAgentText(e.target.value)}
-									placeholder="把現成的會議逐字稿貼進來,按下面轉成便利貼(這格只給你自己看,不會同步給別人)"
+									placeholder={t('panel.pastePlaceholder')}
 									style={{ width: '100%', height: 70, fontSize: 12, resize: 'vertical', boxSizing: 'border-box', marginTop: 6 }}
 								/>
-								<button title="把上面這段逐字稿交給 AI,整理成彩色便利貼" style={{ ...btn, width: '100%', marginTop: 6 }} onClick={runAgent}>
-									丟給 agent
+								<button title={t('panel.sendToAgentTitle')} style={{ ...btn, width: '100%', marginTop: 6 }} onClick={runAgent}>
+									{t('panel.sendToAgent')}
 								</button>
 							</>
 						)}
@@ -2883,7 +2901,7 @@ ${boardImg}
 				)}
 				{panelOpen && transcript.length > 0 && (
 					<div style={{ marginTop: 10, borderTop: '1px solid var(--line)', paddingTop: 8 }}>
-						<div className="muted" style={{ fontSize: 11, marginBottom: 5 }}>逐字記錄 · {transcript.length} 段</div>
+						<div className="muted" style={{ fontSize: 11, marginBottom: 5 }}>{t('panel.transcript', { count: transcript.length })}</div>
 						<div style={{ maxHeight: 150, overflowY: 'auto', fontSize: 12, lineHeight: 1.5 }}>
 							{transcript.map((e: any, i: number) => (
 								<div key={i} style={{ marginBottom: 4 }}>
@@ -2899,10 +2917,10 @@ ${boardImg}
 					<button
 						className="btn-soft"
 						style={{ width: '100%', marginTop: 6, fontSize: 12 }}
-						title="移除上一輪 AI 新增的卡與連線(AI 對既有卡的修改與刪除不在此列)"
+						title={t('panel.undoAiTitle')}
 						onClick={undoLastAi}
 					>
-						撤銷上輪 AI({lastAiIds.length} 張)
+						{t('panel.undoAi', { count: lastAiIds.length })}
 					</button>
 				)}
 				{busy && <div style={{ marginTop: 6, fontSize: 12, color: 'var(--ink-soft)' }}>{busy}</div>}
@@ -2942,20 +2960,20 @@ ${boardImg}
 						}}
 					>
 						<div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 12 }}>
-							<span style={{ color: 'var(--ink-soft)', fontSize: 13, whiteSpace: 'nowrap' }}>你的名字</span>
+							<span style={{ color: 'var(--ink-soft)', fontSize: 13, whiteSpace: 'nowrap' }}>{t('share.yourName')}</span>
 							<input
 								value={myName}
 								onChange={(e) => setMyName(e.target.value.slice(0, 24))}
-								placeholder="會議裡顯示的名字"
+								placeholder={t('share.namePlaceholder')}
 								style={{ flex: 1, font: '14px system-ui', padding: '6px 8px', border: '1px solid var(--line)', borderRadius: 6 }}
 							/>
 						</div>
-						<div style={{ color: 'var(--ink-soft)', fontSize: 13 }}>用手機掃 QR,或輸入房號加入</div>
+						<div style={{ color: 'var(--ink-soft)', fontSize: 13 }}>{t('share.scanHint')}</div>
 						<div className="code" style={{ fontSize: 52, color: 'var(--accent)', margin: '6px 0 16px', lineHeight: 1 }}>{room}</div>
 						{qrUrl ? (
 							<img src={qrUrl} alt="QR" style={{ width: '100%', maxWidth: 240, height: 'auto', border: '1px solid var(--line)', borderRadius: 8 }} />
 						) : (
-							<div style={{ height: 240, lineHeight: '240px', color: 'var(--ink-soft)' }}>產生 QR 中…</div>
+							<div style={{ height: 240, lineHeight: '240px', color: 'var(--ink-soft)' }}>{t('share.qrLoading')}</div>
 						)}
 						<div style={{ display: 'flex', gap: 6, marginTop: 12 }}>
 							<input
@@ -2968,7 +2986,7 @@ ${boardImg}
 								className="btn-soft"
 								onClick={() => navigator.clipboard?.writeText(shareUrl)}
 							>
-								複製連結
+								{t('share.copyLink')}
 							</button>
 						</div>
 						<hr style={{ margin: '16px 0', border: 0, borderTop: '1px solid var(--line)' }} />
@@ -2977,27 +2995,27 @@ ${boardImg}
 								value={joinCode}
 								onChange={(e) => setJoinCode(e.target.value)}
 								onKeyDown={(e) => e.key === 'Enter' && joinRoom()}
-								placeholder="輸入房號加入別房…"
+								placeholder={t('share.joinPlaceholder')}
 								style={{ flex: 1, font: '14px system-ui', padding: '6px 8px', border: '1px solid var(--line)', borderRadius: 6, textTransform: 'uppercase' }}
 							/>
 							<button style={btn} onClick={joinRoom}>
-								加入
+								{t('share.join')}
 							</button>
 						</div>
 						{roomList.length > 0 ? (
 							<div style={{ marginTop: 14, textAlign: 'left', maxHeight: 140, overflowY: 'auto' }}>
-								<div style={{ color: 'var(--ink-soft)', fontSize: 12, marginBottom: 4 }}>進行中的房間</div>
+								<div style={{ color: 'var(--ink-soft)', fontSize: 12, marginBottom: 4 }}>{t('share.activeRooms')}</div>
 								{roomList.map((r) => (
 									<div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 0' }}>
 										<span style={{ flex: 1, fontWeight: r.id === room ? 700 : 400 }}>
-											{r.id} <span style={{ color: 'var(--ink-soft)', fontSize: 12 }}>· {r.online}人 · {r.shapes}張</span>
+											{r.id} <span style={{ color: 'var(--ink-soft)', fontSize: 12 }}>{t('share.roomMeta', { online: r.online, shapes: r.shapes })}</span>
 										</span>
 										{r.id !== room && (
 											<button
 												style={{ ...btn, padding: '2px 8px' }}
 												onClick={() => (location.href = `${location.pathname}?room=${encodeURIComponent(r.id)}`)}
 											>
-												進入
+												{t('share.enter')}
 											</button>
 										)}
 									</div>
@@ -3006,34 +3024,34 @@ ${boardImg}
 						) : roomCount > 0 ? (
 							// 此站不公開房號(房號即進房鑰匙):只顯示數量,要進別房請輸入房號
 							<div style={{ marginTop: 14, color: 'var(--ink-soft)', fontSize: 12 }}>
-								目前 {roomCount} 個房間進行中(此站不公開房號,知道房號才能加入)
+								{t('share.roomCountOnly', { count: roomCount })}
 							</div>
 						) : null}
 						{!READ_ONLY && (
 							<div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
-								<button style={{ ...btn, flex: 1 }} title="打開的人只能看:編輯 UI 隱藏,寫入也會被伺服器丟棄" onClick={copyViewLink}>
-									複製唯讀連結
+								<button style={{ ...btn, flex: 1 }} title={t('share.copyViewLinkTitle')} onClick={copyViewLink}>
+									{t('share.copyViewLink')}
 								</button>
 								<button
 									style={{ ...btn, flex: 1, ...(roomLocked ? { borderColor: 'var(--accent)', color: 'var(--accent)' } : {}) }}
-									title={roomLocked ? '解除後大家都能編輯' : '鎖定後只有你(房主)能編輯,其他人唯讀'}
+									title={roomLocked ? t('share.unlockTitle') : t('share.lockTitle')}
 									onClick={toggleLock}
 								>
-									{roomLocked ? '解除鎖定' : '鎖定白板'}
+									{roomLocked ? t('share.unlock') : t('share.lock')}
 								</button>
 							</div>
 						)}
 						{roomLocked && (
-							<div className="muted" style={{ marginTop: 6, fontSize: 12 }}>此板已鎖定:目前只有房主能編輯</div>
+							<div className="muted" style={{ marginTop: 6, fontSize: 12 }}>{t('share.lockedNote')}</div>
 						)}
 						<div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
 							{!READ_ONLY && (
 								<button style={{ ...btn, flex: 1, color: 'var(--live)' }} onClick={endThisRoom}>
-									結束此房(清空)
+									{t('share.endRoom')}
 								</button>
 							)}
 							<button style={{ ...btn, flex: 1 }} onClick={() => setShareOpen(false)}>
-								關閉
+								{t('share.close')}
 							</button>
 						</div>
 					</div>
