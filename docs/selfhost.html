@@ -105,6 +105,7 @@ npm install &amp;&amp; npm run build      # vite build(前端)→ cargo build --
 				<table>
 					<tr><th>變數</th><th>作用</th><th>備註</th></tr>
 					<tr><td><code>GROQ_API_KEY</code></td><td>雲端 AI(畫卡)與 Groq Whisper 的 key</td><td>雲端部署必填;本機通常直接讀 <code>~/.mori/config.json</code>,可不設</td></tr>
+					<tr><td><code>ADMIN_TOKEN</code></td><td>鎖住主機級設定:設定後 <code>POST /api/settings</code> 與「結束房間」需帶相符的 <code>X-Admin-Token</code> header,否則 401 —— 訪客改不動 whisperUrl / 處理模式 / 本機模式 / 主機 Groq key</td><td>公開部署建議必設;未設時主機級欄位僅接受 loopback 來源修改(同主機反向代理會讓訪客看起來都是 loopback,這種部署一定要設)</td></tr>
 					<tr><td><code>PORT</code></td><td>監聽 port</td><td>本機預設 1334;Render 自動注入</td></tr>
 					<tr><td><code>BIND</code></td><td>綁定位址</td><td><code>0.0.0.0</code> 對外開放(<code>start:lan</code> 已帶)</td></tr>
 					<tr><td><code>HTTPS=1</code></td><td>自帶 TLS,讀 <code>certs/</code> 的憑證</td><td>只給自架區網用;Render 上不要設</td></tr>
