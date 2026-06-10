@@ -627,7 +627,8 @@ pub async fn serve(port: u16) {
             let mut out = vec![];
             for (id, room) in map.iter() {
                 let shapes = store::read_map(room, "shapes").len();
-                out.push(json!({ "id": id, "shapes": shapes, "online": 0 }));
+                let online = room.online.load(std::sync::atomic::Ordering::Relaxed);
+                out.push(json!({ "id": id, "shapes": shapes, "online": online }));
             }
             Ok::<_, warp::Rejection>(warp::reply::json(&json!({ "ok": true, "rooms": out })))
         });
