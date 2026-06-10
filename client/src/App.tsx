@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { flushSync } from 'react-dom'
 import { Stage, Layer, Group, Rect, Text, Arrow, Circle } from 'react-konva'
 import * as Y from 'yjs'
 import { WebsocketProvider } from 'y-websocket'
@@ -153,6 +154,10 @@ function resolveRoom(): string {
 }
 
 const ACCENT = '#b4530a'
+// Konva perf: skip the "perfect draw" buffer-canvas pass on every node — none of our
+// shapes need it (it only matters for translucent fill+stroke overlap), and it costs
+// an extra offscreen draw per node per frame.
+const PERF = { perfectDrawEnabled: false } as const
 // lighten a #rrggbb toward white (for the soft top of the sticky gradient)
 function lighten(hex: string, amt = 0.09): string {
 	const m = /^#?([0-9a-f]{6})$/i.exec(hex)
@@ -293,6 +298,7 @@ export default function App() {
 	const [newFrameTitle, setNewFrameTitle] = useState('')
 	const [exportOpen, setExportOpen] = useState(false)
 	const [pngTransparent, setPngTransparent] = useState(false)
+	const [exporting, setExporting] = useState(false) // true while capturing the whole board (disables viewport culling)
 	const [settingsOpen, setSettingsOpen] = useState(false)
 	const [menuOpen, setMenuOpen] = useState(false) // mobile top-bar overflow menu
 	const [installPrompt, setInstallPrompt] = useState<any>(null) // deferred PWA install prompt
@@ -623,11 +629,13 @@ ${boardImg}
 		const h = bbox.h + PAD * 2
 		const pixelRatio = Math.min(2, maxPx / w, maxPx / h)
 		const prev = { x: stage.x(), y: stage.y(), scaleX: stage.scaleX(), scaleY: stage.scaleY() }
+		flushSync(() => setExporting(true)) // mount viewport-culled (off-screen) nodes before capture
 		stage.position({ x: PAD - bbox.x, y: PAD - bbox.y })
 		stage.scale({ x: 1, y: 1 })
 		const dataUrl = stage.toDataURL({ x: 0, y: 0, width: w, height: h, pixelRatio })
 		stage.position({ x: prev.x, y: prev.y })
 		stage.scale({ x: prev.scaleX, y: prev.scaleY })
+		flushSync(() => setExporting(false))
 		if (transparent) return dataUrl
 		// composite onto paper matching the CURRENT theme (Konva canvas itself is transparent)
 		const paper = getComputedStyle(document.documentElement).getPropertyValue('--paper').trim() || '#f1ece1'
@@ -945,6 +953,28 @@ ${boardImg}
 		else setSearchIdx(0)
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [searchQ])
+	// --- viewport culling: skip rendering stickies/connectors far outside the view.
+	// Margin 200 screen px so fast pans never show pop-in; the dragged / selected /
+	// editing / pending-connect card is always rendered (a culled node mid-drag would
+	// unmount under the pointer), and exports render everything.
+	const CULL_MARGIN = 200
+	const viewWorld = {
+		x: (-view.x - CULL_MARGIN) / view.scale,
+		y: (-view.y - CULL_MARGIN) / view.scale,
+		w: (size.w + CULL_MARGIN * 2) / view.scale,
+		h: (size.h + CULL_MARGIN * 2) / view.scale,
+	}
+	const rectInView = (x: number, y: number, w: number, h: number) =>
+		x + w > viewWorld.x && x < viewWorld.x + viewWorld.w && y + h > viewWorld.y && y < viewWorld.y + viewWorld.h
+	const stickyVisible = (s: Sticky) =>
+		exporting || s.id === selectedId || s.id === editing?.id || s.id === connectFrom || rectInView(s.x, s.y, s.w, s.h)
+	// a connector (straight or elbow) always stays inside the union bbox of its two cards
+	const connVisible = (c: Connector, a: Sticky, b: Sticky) => {
+		if (exporting || c.id === selectedConnId) return true
+		const x = Math.min(a.x, b.x)
+		const y = Math.min(a.y, b.y)
+		return rectInView(x, y, Math.max(a.x + a.w, b.x + b.w) - x, Math.max(a.y + a.h, b.y + b.h) - y)
+	}
 	// which frame (diagram) contains a canvas point — topmost wins
 	const frameAt = (cx: number, cy: number) => {
 		for (let i = frames.length - 1; i >= 0; i--) {
@@ -1752,11 +1782,8 @@ ${boardImg}
 								fill={ct.frameFill}
 								stroke={ct.frameStroke}
 								strokeWidth={1.5}
-								shadowColor={ct.frameShadow}
-								shadowBlur={22}
-								shadowOpacity={0.6}
-								shadowOffsetY={7}
 								listening={false}
+								{...PERF}
 							/>
 							{/* title bar = drag handle (moves frame + its cards); double-click to rename */}
 							<Rect
@@ -1766,6 +1793,7 @@ ${boardImg}
 								height={34}
 								cornerRadius={[18, 18, 0, 0]}
 								fill={ct.frameHeader}
+								{...PERF}
 								draggable
 								onDragMove={(e: any) => {
 									const dx = e.target.x() - f.x
@@ -1789,6 +1817,7 @@ ${boardImg}
 								fontFamily={CANVAS_FONT}
 								fill={ct.frameTitle}
 								listening={false}
+								{...PERF}
 							/>
 							{/* delete this whole diagram (frame + its cards) */}
 							<Group
@@ -1805,8 +1834,8 @@ ${boardImg}
 								onMouseEnter={(e: any) => (e.target.getStage().container().style.cursor = 'pointer')}
 								onMouseLeave={(e: any) => (e.target.getStage().container().style.cursor = 'default')}
 							>
-								<Rect width={22} height={20} cornerRadius={7} fill={ct.frameHeader} />
-								<Text width={22} height={20} text="✕" fontSize={13} fontFamily={CANVAS_FONT} fill={ct.frameTitle} align="center" verticalAlign="middle" />
+								<Rect width={22} height={20} cornerRadius={7} fill={ct.frameHeader} {...PERF} />
+								<Text width={22} height={20} text="✕" fontSize={13} fontFamily={CANVAS_FONT} fill={ct.frameTitle} align="center" verticalAlign="middle" listening={false} {...PERF} />
 							</Group>
 							{/* resize handle (bottom-right) — themed corner grip */}
 							<Rect
@@ -1818,6 +1847,7 @@ ${boardImg}
 								fill={ct.handle}
 								stroke={ct.handleStroke}
 								strokeWidth={1.5}
+								{...PERF}
 								draggable
 								onDragMove={(e: any) => {
 									const w = Math.max(280, e.target.x() - f.x + 20)
@@ -1835,6 +1865,7 @@ ${boardImg}
 						const a = byId(c.from)
 						const b = byId(c.to)
 						if (!a || !b) return null
+						if (!connVisible(c, a, b)) return null // viewport culling
 						const ac: [number, number] = [a.x + a.w / 2, a.y + a.h / 2]
 						const bc: [number, number] = [b.x + b.w / 2, b.y + b.h / 2]
 						const [x1, y1] = edgePoint(ac[0], ac[1], a.w / 2, a.h / 2, bc[0], bc[1])
@@ -1859,6 +1890,7 @@ ${boardImg}
 								pointerLength={10}
 								pointerWidth={10}
 								tension={0}
+								{...PERF}
 								onClick={() => {
 									setSelectedConnId(c.id)
 									setSelectedId(null)
@@ -1870,7 +1902,7 @@ ${boardImg}
 							/>
 						)
 					})}
-					{shapes.map((s) => {
+					{shapes.filter(stickyVisible).map((s) => {
 						const selected = s.id === selectedId
 						const pending = s.id === connectFrom
 						return (
@@ -1911,14 +1943,16 @@ ${boardImg}
 									shadowOpacity={selected ? 0.28 : 0.17}
 									shadowBlur={selected ? 26 : 18}
 									shadowOffsetY={selected ? 12 : 8}
+									shadowForStrokeEnabled={false}
 									stroke={pending ? ACCENT : selected ? '#1c1a17' : 'rgba(255,255,255,0.45)'}
 									strokeWidth={pending ? 3 : selected ? 2 : 1}
+									{...PERF}
 								/>
 								{/* kind accent dot */}
-								<Circle x={18} y={18} radius={5} fill={KIND_ACCENT[s.color] ?? '#1c1a17'} opacity={0.8} />
+								<Circle x={18} y={18} radius={5} fill={KIND_ACCENT[s.color] ?? '#1c1a17'} opacity={0.8} listening={false} {...PERF} />
 								{/* editor number (fallback handle: "把 N 號…") — not on notes */}
 								{!(s as any).note && cardNum[s.id] && (
-									<Text x={s.w - 30} y={11} width={20} align="right" text={String(cardNum[s.id])} fontSize={12} fontStyle="600" fontFamily={CANVAS_FONT} fill="rgba(28,26,23,0.4)" listening={false} />
+									<Text x={s.w - 30} y={11} width={20} align="right" text={String(cardNum[s.id])} fontSize={12} fontStyle="600" fontFamily={CANVAS_FONT} fill="rgba(28,26,23,0.4)" listening={false} {...PERF} />
 								)}
 								<Text
 									text={s.text}
@@ -1932,6 +1966,8 @@ ${boardImg}
 									fill="#1f1c18"
 									align="center"
 									verticalAlign="middle"
+									listening={false}
+									{...PERF}
 								/>
 								{/* content tags (top row) — click to filter by tag */}
 								{(() => {
@@ -1948,8 +1984,8 @@ ${boardImg}
 												onClick={(e: any) => { e.cancelBubble = true; setFilter({ type: 'tag', value: t }) }}
 												onTap={(e: any) => { e.cancelBubble = true; setFilter({ type: 'tag', value: t }) }}
 											>
-												<Rect width={w} height={17} cornerRadius={8} fill="rgba(28,26,23,0.1)" />
-												<Text x={6} y={3} text={t} fontSize={10.5} fontFamily={CANVAS_FONT} fill="rgba(28,26,23,0.6)" />
+												<Rect width={w} height={17} cornerRadius={8} fill="rgba(28,26,23,0.1)" {...PERF} />
+												<Text x={6} y={3} text={t} fontSize={10.5} fontFamily={CANVAS_FONT} fill="rgba(28,26,23,0.6)" listening={false} {...PERF} />
 											</Group>
 										)
 									})
@@ -1966,8 +2002,8 @@ ${boardImg}
 											onClick={(e: any) => { e.cancelBubble = true; setFilter({ type: 'owner', value: person }) }}
 											onTap={(e: any) => { e.cancelBubble = true; setFilter({ type: 'owner', value: person }) }}
 										>
-											<Rect width={w} height={19} cornerRadius={9.5} fill={s.owner ? 'rgba(180,83,10,0.18)' : 'rgba(28,26,23,0.1)'} />
-											<Text x={9} y={3.5} text={person} fontSize={11} fontFamily={CANVAS_FONT} fontStyle={s.owner ? '600' : 'normal'} fill={s.owner ? '#8a3f08' : 'rgba(28,26,23,0.6)'} />
+											<Rect width={w} height={19} cornerRadius={9.5} fill={s.owner ? 'rgba(180,83,10,0.18)' : 'rgba(28,26,23,0.1)'} {...PERF} />
+											<Text x={9} y={3.5} text={person} fontSize={11} fontFamily={CANVAS_FONT} fontStyle={s.owner ? '600' : 'normal'} fill={s.owner ? '#8a3f08' : 'rgba(28,26,23,0.6)'} listening={false} {...PERF} />
 										</Group>
 									)
 								})()}
@@ -1977,20 +2013,9 @@ ${boardImg}
 					{/* live cursors of everyone else (Mori + other humans) */}
 					{cursors.map((c) => (
 						<Group key={c.id} x={c.x} y={c.y} listening={false}>
-							<Circle radius={7} fill={c.color} stroke="#fff" strokeWidth={2} shadowColor="#1c1a17" shadowOpacity={0.25} shadowBlur={6} shadowOffsetY={2} />
-							<Rect
-								x={11}
-								y={-10}
-								width={c.name.length * 8.5 + 16}
-								height={20}
-								cornerRadius={10}
-								fill={c.color}
-								shadowColor="#1c1a17"
-								shadowOpacity={0.2}
-								shadowBlur={6}
-								shadowOffsetY={2}
-							/>
-							<Text x={19} y={-6} text={c.name} fontSize={12} fontFamily={CANVAS_FONT} fontStyle="600" fill="#fff" />
+							<Circle radius={7} fill={c.color} stroke="#fff" strokeWidth={2} {...PERF} />
+							<Rect x={11} y={-10} width={c.name.length * 8.5 + 16} height={20} cornerRadius={10} fill={c.color} {...PERF} />
+							<Text x={19} y={-6} text={c.name} fontSize={12} fontFamily={CANVAS_FONT} fontStyle="600" fill="#fff" {...PERF} />
 						</Group>
 					))}
 				</Layer>
