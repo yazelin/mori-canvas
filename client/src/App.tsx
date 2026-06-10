@@ -534,6 +534,8 @@ export default function App() {
 		tx(() => {
 			yShapes.clear()
 			yConnectors.clear()
+			yFrames.clear() // 圖框也要清,否則「清空」後空圖框留在板上
+			if (yTranscript.length) yTranscript.delete(0, yTranscript.length) // 連逐字記錄一起清
 		})
 
 	function exportMd() {
