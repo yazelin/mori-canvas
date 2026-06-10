@@ -42,11 +42,11 @@ pub fn set_meta(room: &Room, typ: Option<&str>, topic: Option<&str>) {
     }
 }
 
-/// apply tidy positions to shapes + sizes to frames in one transaction
+/// apply tidy positions to shapes + placements (x/y/w/h) to frames in one transaction
 pub fn apply_tidy(
     room: &Room,
     positions: &[(String, f64, f64)],
-    frame_sizes: &[(String, f64, f64)],
+    frames_out: &[crate::layout::FramePlace],
 ) {
     let doc = room.awareness.doc();
     let shapes = doc.get_or_insert_map("shapes");
@@ -60,12 +60,14 @@ pub fn apply_tidy(
             shapes.insert(&mut txn, id.clone(), json_to_any(&v));
         }
     }
-    for (id, w, h) in frame_sizes {
-        if let Some(cur) = frames.get(&txn, id) {
+    for f in frames_out {
+        if let Some(cur) = frames.get(&txn, &f.id) {
             let mut v = any_to_json(&cur.to_json(&txn));
-            v["w"] = json!(w);
-            v["h"] = json!(h);
-            frames.insert(&mut txn, id.clone(), json_to_any(&v));
+            v["x"] = json!(f.x);
+            v["y"] = json!(f.y);
+            v["w"] = json!(f.w);
+            v["h"] = json!(f.h);
+            frames.insert(&mut txn, f.id.clone(), json_to_any(&v));
         }
     }
 }

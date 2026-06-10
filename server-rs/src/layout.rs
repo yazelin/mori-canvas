@@ -111,18 +111,26 @@ fn col_positions(cards: &[Card], ox: f64, oy: f64, sp: f64) -> Pos {
             .then(a.y.partial_cmp(&b.y).unwrap_or(std::cmp::Ordering::Equal))
             .then(a.x.partial_cmp(&b.x).unwrap_or(std::cmp::Ordering::Equal))
     });
-    let mut row_by_col: HashMap<usize, usize> = HashMap::new();
+    // 欄寬 = 該欄最大卡寬(使用者拉大的卡不再蓋到隔壁欄);欄內 y 累計實際卡高
+    let mut col_w: HashMap<usize, f64> = HashMap::new();
+    for c in &sorted {
+        let e = col_w.entry(column_of(&c.color)).or_insert(CARD_W);
+        *e = e.max(c.w);
+    }
+    let mut cols: Vec<usize> = col_w.keys().copied().collect();
+    cols.sort();
+    let mut col_x: HashMap<usize, f64> = HashMap::new();
+    let mut x = ox;
+    for col in cols {
+        col_x.insert(col, x);
+        x += col_w[&col] + COL_GAP * sp;
+    }
+    let mut col_y: HashMap<usize, f64> = HashMap::new();
     for c in sorted {
         let col = column_of(&c.color);
-        let row = *row_by_col.get(&col).unwrap_or(&0);
-        row_by_col.insert(col, row + 1);
-        pos.insert(
-            c.id.clone(),
-            (
-                ox + col as f64 * (CARD_W + COL_GAP * sp),
-                oy + row as f64 * (CARD_H + ROW_GAP * sp),
-            ),
-        );
+        let y = *col_y.get(&col).unwrap_or(&oy);
+        pos.insert(c.id.clone(), (col_x[&col], y));
+        col_y.insert(col, y + c.h + ROW_GAP * sp);
     }
     pos
 }
@@ -163,6 +171,8 @@ fn levels_longest(
     level
 }
 
+/// tidy-tree:父節點置中於子樹之上、同一父的子節點相鄰。
+/// 杜絕舊版「逐層平鋪」造成的長距離跨欄連線(線壓過無關卡片)。
 fn tree_positions(
     cards: &[Card],
     conns: &[(String, String)],
@@ -178,6 +188,9 @@ fn tree_positions(
     let by_id: HashMap<&String, &Card> = cards.iter().map(|c| (&c.id, c)).collect();
     let (ids, children, indeg) = build_graph(cards, conns);
     let level = levels_longest(&ids, &children, &indeg);
+    // spanning tree:只保留 level 差 1 的邊;每個子節點只認第一個父(DAG 的其餘邊只畫線不佔位)
+    let mut kids: HashMap<String, Vec<String>> = ids.iter().map(|i| (i.clone(), vec![])).collect();
+    let mut has_parent: HashSet<String> = HashSet::new();
     let mut order = ids.clone();
     order.sort_by(|a, b| {
         let la = *level.get(a).unwrap_or(&0);
@@ -191,24 +204,59 @@ fn tree_positions(
             }
         })
     });
-    let mut by_level: HashMap<i64, Vec<String>> = HashMap::new();
-    for id in &order {
-        by_level
-            .entry(*level.get(id).unwrap_or(&0))
-            .or_default()
-            .push(id.clone());
-    }
-    let gx = CARD_W + 50.0 * sp;
-    let gy = CARD_H + 40.0 * sp;
-    for (lv, list) in &by_level {
-        for (i, id) in list.iter().enumerate() {
-            let p = if dir == "LR" {
-                (ox + *lv as f64 * gx, oy + i as f64 * gy)
-            } else {
-                (ox + i as f64 * gx, oy + *lv as f64 * gy)
-            };
-            pos.insert(id.clone(), p);
+    for p in &order {
+        for ch in children.get(p).cloned().unwrap_or_default() {
+            if *level.get(&ch).unwrap_or(&0) == *level.get(p).unwrap_or(&0) + 1
+                && !has_parent.contains(&ch)
+            {
+                kids.get_mut(p).unwrap().push(ch.clone());
+                has_parent.insert(ch);
+            }
         }
+    }
+    // 遞迴:葉節點拿連續 slot,父節點置中於子節點 slot 範圍
+    fn place(
+        id: &str,
+        kids: &HashMap<String, Vec<String>>,
+        slot: &mut HashMap<String, f64>,
+        next: &mut f64,
+    ) -> f64 {
+        let ch = kids.get(id).cloned().unwrap_or_default();
+        let s = if ch.is_empty() {
+            let s = *next;
+            *next += 1.0;
+            s
+        } else {
+            let centers: Vec<f64> = ch.iter().map(|c| place(c, kids, slot, next)).collect();
+            (centers[0] + centers[centers.len() - 1]) / 2.0
+        };
+        slot.insert(id.to_string(), s);
+        s
+    }
+    let mut slot: HashMap<String, f64> = HashMap::new();
+    let mut next = 0.0_f64;
+    for id in &order {
+        if !has_parent.contains(id) && !slot.contains_key(id) {
+            place(id, &kids, &mut slot, &mut next);
+        }
+    }
+    // 座標:主軸 = level,交叉軸 = slot;間距取整批最大卡尺寸保證不疊
+    let max_w = cards.iter().map(|c| c.w).fold(CARD_W, f64::max);
+    let max_h = cards.iter().map(|c| c.h).fold(CARD_H, f64::max);
+    let (slot_gap, level_gap) = if dir == "LR" {
+        (max_h + 40.0 * sp, max_w + 50.0 * sp)
+    } else {
+        (max_w + 50.0 * sp, max_h + 40.0 * sp)
+    };
+    for id in &ids {
+        let lv = *level.get(id).unwrap_or(&0) as f64;
+        let s = *slot.get(id).unwrap_or(&0.0);
+        let p = if dir == "LR" {
+            (ox + lv * level_gap, oy + s * slot_gap)
+        } else {
+            (ox + s * slot_gap, oy + lv * level_gap)
+        };
+        pos.insert(id.clone(), p);
     }
     pos
 }
@@ -323,25 +371,40 @@ fn radial_positions(cards: &[Card], conns: &[(String, String)], ox: f64, oy: f64
         &mut ang,
         &mut HashSet::new(),
     );
+    // 每層半徑:等差環距與「該層卡數所需周長」取大者 → 卡多的層自動撐大,不再擠成一圈疊住
     let ring = 200.0 + 40.0 * sp;
-    let max_lv = level.values().copied().max().unwrap_or(0).max(0) as f64;
-    let cx = ox + ring * max_lv;
-    let cy = oy + ring * max_lv;
+    let max_lv = level.values().copied().max().unwrap_or(0).max(0);
+    let diag = (CARD_W * CARD_W + CARD_H * CARD_H).sqrt() + 30.0 * sp;
+    let mut count_at: HashMap<i64, usize> = HashMap::new();
     for id in &ids {
-        let lv = *level.get(id).unwrap_or(&0) as f64;
-        if lv == 0.0 {
+        *count_at.entry(*level.get(id).unwrap_or(&1)).or_insert(0) += 1;
+    }
+    let mut radius_at: HashMap<i64, f64> = HashMap::new();
+    let mut prev = 0.0_f64;
+    for lv in 1..=max_lv {
+        let n = *count_at.get(&lv).unwrap_or(&0) as f64;
+        let needed = n * diag / (2.0 * std::f64::consts::PI);
+        let r = (prev + ring).max(needed);
+        radius_at.insert(lv, r);
+        prev = r;
+    }
+    let span = prev.max(ring);
+    let cx = ox + span;
+    let cy = oy + span;
+    for id in &ids {
+        let lv = *level.get(id).unwrap_or(&0);
+        if lv == 0 {
             pos.insert(id.clone(), (cx, cy));
         } else {
             let a = *ang.get(id).unwrap_or(&0.0);
-            pos.insert(
-                id.clone(),
-                (cx + ring * lv * a.cos(), cy + ring * lv * a.sin()),
-            );
+            let r = *radius_at.get(&lv).unwrap_or(&ring);
+            pos.insert(id.clone(), (cx + r * a.cos(), cy + r * a.sin()));
         }
     }
     pos
 }
 
+/// SWOT 四象限:每象限排成 2 欄網格(不再是一直欄),象限大小取四象限最大,永不互疊。
 fn quadrant_positions(cards: &[Card], ox: f64, oy: f64, sp: f64) -> Pos {
     let mut pos = Pos::new();
     let mut g: HashMap<&str, Vec<&Card>> = HashMap::new();
@@ -353,21 +416,35 @@ fn quadrant_positions(cards: &[Card], ox: f64, oy: f64, sp: f64) -> Pos {
         g.entry(key).or_default().push(c);
     }
     let gy = 24.0 * sp;
+    let gx = 24.0 * sp;
+    const COLS: usize = 2;
     let empty = vec![];
-    let green = g.get("green").unwrap_or(&empty);
-    let yellow = g.get("yellow").unwrap_or(&empty);
-    let top_rows = green.len().max(yellow.len()) as f64;
-    let bot_y = oy + top_rows * (CARD_H + gy) + 80.0;
-    let left_x = ox;
-    let right_x = ox + CARD_W + 80.0 * sp;
-    let mut place = |arr: &Vec<&Card>, x: f64, y0: f64, pos: &mut Pos| {
+    let quad_rows = |n: usize| n.div_ceil(COLS);
+    let max_rows = ["green", "yellow", "blue", "red"]
+        .iter()
+        .map(|k| quad_rows(g.get(*k).unwrap_or(&empty).len()))
+        .max()
+        .unwrap_or(1)
+        .max(1) as f64;
+    let quad_w = COLS as f64 * (CARD_W + gx);
+    let quad_h = max_rows * (CARD_H + gy);
+    let place = |arr: &Vec<&Card>, x0: f64, y0: f64, pos: &mut Pos| {
         for (i, c) in arr.iter().enumerate() {
-            pos.insert(c.id.clone(), (x, y0 + i as f64 * (CARD_H + gy)));
+            let (col, row) = (i % COLS, i / COLS);
+            pos.insert(
+                c.id.clone(),
+                (
+                    x0 + col as f64 * (CARD_W + gx),
+                    y0 + row as f64 * (CARD_H + gy),
+                ),
+            );
         }
     };
-    place(green, left_x, oy, &mut pos);
-    place(yellow, right_x, oy, &mut pos);
-    place(g.get("blue").unwrap_or(&empty), left_x, bot_y, &mut pos);
+    let right_x = ox + quad_w + 80.0 * sp;
+    let bot_y = oy + quad_h + 80.0;
+    place(g.get("green").unwrap_or(&empty), ox, oy, &mut pos);
+    place(g.get("yellow").unwrap_or(&empty), right_x, oy, &mut pos);
+    place(g.get("blue").unwrap_or(&empty), ox, bot_y, &mut pos);
     place(g.get("red").unwrap_or(&empty), right_x, bot_y, &mut pos);
     pos
 }
@@ -524,6 +601,36 @@ fn gantt_positions(cards: &[Card], conns: &[(String, String)], ox: f64, oy: f64,
     pos
 }
 
+/// 最終防線:layout 演算法之外的任何殘餘重疊(radial 角度過近、奇形怪狀的圖)
+/// 由上而下掃,疊到的卡往下推。最多 6 輪,每輪 O(n^2)(n = 單一 frame 卡數,夠小)。
+fn resolve_collisions(cards: &[Card], pos: &mut Pos, sp: f64) {
+    let pad = 16.0 * sp;
+    for _ in 0..6 {
+        let mut moved = false;
+        let mut order: Vec<&Card> = cards.iter().filter(|c| pos.contains_key(&c.id)).collect();
+        order.sort_by(|a, b| {
+            let (_, ay) = pos[&a.id];
+            let (_, by) = pos[&b.id];
+            ay.partial_cmp(&by).unwrap_or(std::cmp::Ordering::Equal)
+        });
+        for i in 0..order.len() {
+            for j in i + 1..order.len() {
+                let (ax, ay) = pos[&order[i].id];
+                let (bx, by) = pos[&order[j].id];
+                let (aw, ah) = (order[i].w, order[i].h);
+                let (bw, bh) = (order[j].w, order[j].h);
+                if ax < bx + bw && bx < ax + aw && ay < by + bh && by < ay + ah {
+                    pos.insert(order[j].id.clone(), (bx, ay + ah + pad));
+                    moved = true;
+                }
+            }
+        }
+        if !moved {
+            break;
+        }
+    }
+}
+
 fn layout_positions(
     type_key: &str,
     cards: &[Card],
@@ -533,14 +640,16 @@ fn layout_positions(
     sp: f64,
 ) -> Pos {
     let bt = board_type(type_key);
-    match bt.layout {
+    let mut pos = match bt.layout {
         "tree" => tree_positions(cards, conns, ox, oy, bt.dir, sp),
         "radial" => radial_positions(cards, conns, ox, oy, sp),
         "quadrant" => quadrant_positions(cards, ox, oy, sp),
         "fishbone" => fishbone_positions(cards, conns, ox, oy, sp),
         "gantt" => gantt_positions(cards, conns, ox, oy, sp),
         _ => col_positions(cards, ox, oy, sp),
-    }
+    };
+    resolve_collisions(cards, &mut pos, sp);
+    pos
 }
 
 pub struct Frame {
@@ -562,19 +671,29 @@ pub fn frame_from(v: &Value) -> Option<Frame> {
     })
 }
 
-/// Returns (card positions, frame sizes). Frameless boards => one whole-board layout.
+pub struct FramePlace {
+    pub id: String,
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+}
+
+/// Returns (card positions, frame placements). Frameless boards => one whole-board layout.
+/// frame 先在原點排版量尺寸,再整批 re-pack(列式、超寬換行)—— 舊版只放大不移位,
+/// frame 長大後會蓋到建立時排在右邊的鄰居;現在 frame 永不互疊。
 pub fn tidy(
     meta_type: &str,
     shapes: &[Value],
     conns_v: &[Value],
     frames_v: &[Value],
     sp: f64,
-) -> (Vec<(String, f64, f64)>, Vec<(String, f64, f64)>) {
+) -> (Vec<(String, f64, f64)>, Vec<FramePlace>) {
     let cards: Vec<Card> = shapes.iter().filter_map(card_from).collect();
     let conns = conn_pairs(conns_v);
     let frames: Vec<Frame> = frames_v.iter().filter_map(frame_from).collect();
     let mut out_pos: Vec<(String, f64, f64)> = vec![];
-    let mut out_frames: Vec<(String, f64, f64)> = vec![];
+    let mut out_frames: Vec<FramePlace> = vec![];
     if frames.is_empty() {
         let pos = layout_positions(meta_type, &cards, &conns, X0, Y0, sp);
         for (id, (x, y)) in pos {
@@ -582,35 +701,262 @@ pub fn tidy(
         }
         return (out_pos, out_frames);
     }
+    // pass 1:每個 frame 在 (0,0) 排版,量出內容尺寸
+    struct Laid {
+        frame: Frame,
+        rel: Pos,
+        cards: Vec<Card>,
+        w: f64,
+        h: f64,
+    }
+    let mut laid: Vec<Laid> = vec![];
     for f in &frames {
         let fcards: Vec<Card> = cards
             .iter()
             .filter(|c| c.frame_id.as_deref() == Some(f.id.as_str()))
             .cloned()
             .collect();
-        if fcards.is_empty() {
-            continue;
-        }
-        let pos = layout_positions(
-            &f.typ,
-            &fcards,
-            &conns,
-            f.x + FRAME_PAD,
-            f.y + FRAME_HEAD,
-            sp,
-        );
-        let mut max_x = f.x;
-        let mut max_y = f.y;
+        let rel = layout_positions(&f.typ, &fcards, &conns, 0.0, 0.0, sp);
+        let mut max_x = 0.0_f64;
+        let mut max_y = 0.0_f64;
         for c in &fcards {
-            if let Some((x, y)) = pos.get(&c.id) {
-                out_pos.push((c.id.clone(), *x, *y));
+            if let Some((x, y)) = rel.get(&c.id) {
                 max_x = max_x.max(x + c.w);
                 max_y = max_y.max(y + c.h);
             }
         }
-        let w = (max_x - f.x + FRAME_PAD).max(440.0);
-        let h = (max_y - f.y + FRAME_PAD).max(300.0);
-        out_frames.push((f.id.clone(), w, h));
+        let w = (max_x + FRAME_PAD * 2.0).max(440.0);
+        let h = (max_y + FRAME_PAD + FRAME_HEAD).max(300.0);
+        laid.push(Laid {
+            frame: Frame {
+                id: f.id.clone(),
+                typ: f.typ.clone(),
+                x: f.x,
+                y: f.y,
+            },
+            rel,
+            cards: fcards,
+            w,
+            h,
+        });
+    }
+    // pass 2:依目前閱讀順序(y 再 x)re-pack 成列,超寬換行 → frame 永不互疊
+    laid.sort_by(|a, b| {
+        a.frame
+            .y
+            .partial_cmp(&b.frame.y)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(
+                a.frame
+                    .x
+                    .partial_cmp(&b.frame.x)
+                    .unwrap_or(std::cmp::Ordering::Equal),
+            )
+    });
+    const FRAME_GAP: f64 = 90.0;
+    const MAX_ROW_W: f64 = 3200.0;
+    let (mut cx, mut cy) = (80.0_f64, 80.0_f64);
+    let mut row_h = 0.0_f64;
+    for l in &laid {
+        if cx > 80.0 && cx + l.w > MAX_ROW_W {
+            cx = 80.0;
+            cy += row_h + FRAME_GAP;
+            row_h = 0.0;
+        }
+        for c in &l.cards {
+            if let Some((rx, ry)) = l.rel.get(&c.id) {
+                out_pos.push((c.id.clone(), cx + FRAME_PAD + rx, cy + FRAME_HEAD + ry));
+            }
+        }
+        out_frames.push(FramePlace {
+            id: l.frame.id.clone(),
+            x: cx,
+            y: cy,
+            w: l.w,
+            h: l.h,
+        });
+        cx += l.w + FRAME_GAP;
+        row_h = row_h.max(l.h);
     }
     (out_pos, out_frames)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn mk(id: &str, color: &str, w: f64, h: f64) -> Card {
+        Card {
+            id: id.into(),
+            color: color.into(),
+            x: 0.0,
+            y: 0.0,
+            w,
+            h,
+            frame_id: None,
+            owner: None,
+        }
+    }
+
+    fn rects_disjoint(cards: &[Card], pos: &Pos) -> bool {
+        let r: Vec<(f64, f64, f64, f64)> = cards
+            .iter()
+            .filter_map(|c| pos.get(&c.id).map(|(x, y)| (*x, *y, c.w, c.h)))
+            .collect();
+        for i in 0..r.len() {
+            for j in i + 1..r.len() {
+                let (ax, ay, aw, ah) = r[i];
+                let (bx, by, bw, bh) = r[j];
+                if ax < bx + bw && bx < ax + aw && ay < by + bh && by < ay + ah {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+
+    #[test]
+    fn columns_respect_actual_card_sizes() {
+        let cards = vec![
+            mk("a", "yellow", 200.0, 200.0),
+            mk("b", "yellow", 200.0, 420.0), // 使用者拉大的卡
+            mk("c", "yellow", 200.0, 200.0),
+            mk("d", "green", 360.0, 200.0),
+            mk("e", "green", 200.0, 200.0),
+        ];
+        let pos = col_positions(&cards, 0.0, 0.0, 1.0);
+        assert!(rects_disjoint(&cards, &pos));
+    }
+
+    #[test]
+    fn tree_parents_centered_over_children_and_disjoint() {
+        let cards: Vec<Card> = ["root", "a", "b", "c", "a1", "a2", "b1"]
+            .iter()
+            .map(|id| mk(id, "yellow", 200.0, 200.0))
+            .collect();
+        let conns = vec![
+            ("root".to_string(), "a".to_string()),
+            ("root".to_string(), "b".to_string()),
+            ("root".to_string(), "c".to_string()),
+            ("a".to_string(), "a1".to_string()),
+            ("a".to_string(), "a2".to_string()),
+            ("b".to_string(), "b1".to_string()),
+        ];
+        let pos = tree_positions(&cards, &conns, 0.0, 0.0, "TB", 1.0);
+        assert!(rects_disjoint(&cards, &pos));
+        // a 必須水平置中在 a1、a2 之間;a1 a2 同一列
+        let (ax, _) = pos["a"];
+        let (a1x, a1y) = pos["a1"];
+        let (a2x, a2y) = pos["a2"];
+        assert!((ax - (a1x + a2x) / 2.0).abs() < 1.0, "parent centered");
+        assert_eq!(a1y, a2y);
+    }
+
+    #[test]
+    fn radial_dense_level_grows_radius() {
+        let mut cards = vec![mk("hub", "blue", 200.0, 200.0)];
+        let mut conns = vec![];
+        for i in 0..14 {
+            let id = format!("n{}", i);
+            cards.push(mk(&id, "green", 200.0, 200.0));
+            conns.push(("hub".to_string(), id));
+        }
+        let pos = radial_positions(&cards, &conns, 0.0, 0.0, 1.0);
+        assert!(rects_disjoint(&cards, &pos));
+    }
+
+    #[test]
+    fn quadrant_grid_two_cols_disjoint() {
+        let mut cards = vec![];
+        for i in 0..7 {
+            cards.push(mk(&format!("g{}", i), "green", 200.0, 200.0));
+        }
+        for i in 0..3 {
+            cards.push(mk(&format!("r{}", i), "red", 200.0, 200.0));
+        }
+        let pos = quadrant_positions(&cards, 0.0, 0.0, 1.0);
+        assert!(rects_disjoint(&cards, &pos));
+        // green 7 張要排成 2 欄,不是 7 張一直欄
+        let xs: HashSet<i64> = (0..7)
+            .map(|i| pos[&format!("g{}", i)].0 as i64)
+            .collect();
+        assert_eq!(xs.len(), 2);
+    }
+
+    #[test]
+    fn safety_net_separates_any_residual_overlap() {
+        let cards = vec![
+            mk("a", "yellow", 200.0, 200.0),
+            mk("b", "yellow", 200.0, 200.0),
+        ];
+        let mut pos = Pos::new();
+        pos.insert("a".into(), (0.0, 0.0));
+        pos.insert("b".into(), (50.0, 30.0)); // 故意疊
+        resolve_collisions(&cards, &mut pos, 1.0);
+        assert!(rects_disjoint(&cards, &pos));
+    }
+
+    #[test]
+    fn tidy_repacks_frames_no_overlap() {
+        // 兩個 frame 起始互疊,各 4 張卡
+        let frames = vec![
+            json!({"id":"f1","type":"meeting","x":80.0,"y":80.0,"w":480.0,"h":320.0}),
+            json!({"id":"f2","type":"flow","x":200.0,"y":120.0,"w":480.0,"h":320.0}),
+        ];
+        let mut shapes = vec![];
+        for i in 0..4 {
+            shapes.push(json!({"id":format!("c{}",i),"type":"sticky","color":"yellow","x":0.0,"y":0.0,"w":200.0,"h":200.0,"frameId":"f1"}));
+            shapes.push(json!({"id":format!("d{}",i),"type":"sticky","color":"green","x":0.0,"y":0.0,"w":200.0,"h":200.0,"frameId":"f2"}));
+        }
+        let (pos, fr) = tidy("meeting", &shapes, &[], &frames, 1.0);
+        assert_eq!(fr.len(), 2);
+        // frame 矩形必須不相交
+        let r: Vec<(f64, f64, f64, f64)> = fr.iter().map(|f| (f.x, f.y, f.w, f.h)).collect();
+        assert!(
+            !(r[0].0 < r[1].0 + r[1].2
+                && r[1].0 < r[0].0 + r[0].2
+                && r[0].1 < r[1].1 + r[1].3
+                && r[1].1 < r[0].1 + r[0].3),
+            "frames overlap: {:?}",
+            r
+        );
+        // 每張卡要落在自己 frame 的矩形內(c* -> f1, d* -> f2)
+        let fbyid: HashMap<&str, &FramePlace> = fr.iter().map(|f| (f.id.as_str(), f)).collect();
+        for (id, x, y) in &pos {
+            let f = if id.starts_with('c') { fbyid["f1"] } else { fbyid["f2"] };
+            assert!(
+                *x >= f.x && *y >= f.y && *x + 200.0 <= f.x + f.w + 1.0 && *y + 200.0 <= f.y + f.h + 1.0,
+                "card {} ({},{}) outside frame {:?}",
+                id, x, y, (f.x, f.y, f.w, f.h)
+            );
+        }
+    }
+
+    #[test]
+    fn all_board_types_produce_disjoint_layouts() {
+        for t in [
+            "meeting", "orgchart", "flow", "architecture", "mindmap",
+            "kanban", "swot", "timeline", "fishbone", "gantt",
+        ] {
+            let colors = ["yellow", "green", "blue", "red"];
+            let cards: Vec<Card> = (0..13)
+                .map(|i| {
+                    let mut c = mk(&format!("n{}", i), colors[i % 4], 200.0, 200.0);
+                    if i == 5 {
+                        c.w = 380.0;
+                        c.h = 300.0; // 一張使用者拉大的卡
+                    }
+                    c
+                })
+                .collect();
+            let mut conns: Vec<(String, String)> = (1..13)
+                .map(|i| (format!("n{}", (i - 1) / 2), format!("n{}", i)))
+                .collect(); // 二元樹
+            conns.push(("n3".into(), "n12".into())); // 非樹邊(DAG)
+            let pos = layout_positions(t, &cards, &conns, 0.0, 0.0, 1.0);
+            assert_eq!(pos.len(), cards.len(), "{}: all cards placed", t);
+            assert!(rects_disjoint(&cards, &pos), "{}: cards overlap", t);
+        }
+    }
 }
