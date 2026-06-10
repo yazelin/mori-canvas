@@ -24,6 +24,10 @@ FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=server /app/server-rs/target/release/mori-canvas-server /usr/local/bin/mori-canvas-server
+# Room snapshots persist to ./.data (relative to CWD) => /app/.data here.
+# Mount a volume to keep boards across container restarts:
+#   docker run -p 1334:1334 -v "$PWD/data:/app/.data" -e GROQ_API_KEY=gsk_xxx ghcr.io/yazelin/mori-canvas
+WORKDIR /app
 # Render/most PaaS set PORT; bind all interfaces. TLS is terminated at the platform edge,
 # so the container serves plain HTTP (do NOT set HTTPS=1 here).
 ENV BIND=0.0.0.0 PORT=1334
