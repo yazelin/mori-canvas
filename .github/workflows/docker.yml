@@ -1,0 +1,44 @@
+name: docker
+
+# 打 `v*` tag(或手動 workflow_dispatch)→ build Docker image 推上
+# ghcr.io/yazelin/mori-canvas:
+#   - tag push:推 `latest` + 版本 tag(例 v0.2.0 → 0.2.0)
+#   - 手動觸發:只推 `latest`(驗 image 用)
+# 自架者一行起服務(資料掛 volume 持久化):
+#   docker run -p 1334:1334 -v "$PWD/data:/app/.data" -e GROQ_API_KEY=gsk_xxx ghcr.io/yazelin/mori-canvas
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write # 推 ghcr.io 需要
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=raw,value=latest
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
