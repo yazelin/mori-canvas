@@ -166,6 +166,8 @@ function elbowPoints(a: Sticky, b: Sticky, dir: 'TB' | 'LR'): number[] {
 // proxy, so this works over http OR https (and behind a tunnel) with no hardcoded
 // port. ws upgrades to wss automatically when the page is served over https.
 const SYNC_HTTP = '' // relative -> /api/... on the current origin
+// ?view=1 = 唯讀檢視連結(分享成品用):隱藏編輯 UI;真正的寫入封鎖在 server ws 層
+const READ_ONLY = new URLSearchParams(location.search).get('view') === '1'
 const SYNC_WS = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/sync`
 
 const DEMO_TRANSCRIPT =
@@ -245,7 +247,18 @@ export default function App() {
 
 	const { doc, yShapes, yConnectors, yMeta, yFrames, yTranscript, provider, undoMgr, LOCAL } = useMemo(() => {
 		const doc = new Y.Doc()
-		const provider = new WebsocketProvider(SYNC_WS, room, doc)
+		// ?view=1 唯讀連結:server 在 ws 層丟棄這條連線的文件寫入(UI 隱藏只是 UX,enforce 在 server);
+		// key = 房主鑰匙,鎖板時 server 憑它放行房主的寫入
+		const params: Record<string, string> = {}
+		if (READ_ONLY) params.view = '1'
+		let ok = localStorage.getItem(`wb-owner-${room}`)
+		if (!ok && !READ_ONLY) {
+			// 先發鑰匙再連線:之後 claim 成功(先到先得)這條連線就直接是房主,鎖板不用重連
+			ok = genCode(10)
+			localStorage.setItem(`wb-owner-${room}`, ok)
+		}
+		if (ok) params.key = ok
+		const provider = new WebsocketProvider(SYNC_WS, room, doc, { params })
 		const yShapes = doc.getMap<Sticky>('shapes')
 		const yConnectors = doc.getMap<Connector>('connectors')
 		const yMeta = doc.getMap<string>('meta') // board type + topic
@@ -477,6 +490,7 @@ export default function App() {
 		})
 	}
 	const addSticky = (x: number, y: number, text = '', color = 'yellow') => {
+		if (READ_ONLY) return ''
 		maybeAskName() // 不擋建卡,只順勢補問一次
 		const id = `sticky-${Math.random().toString(36).slice(2, 10)}`
 		tx(() => yShapes.set(id, { id, x, y, w: 200, h: 200, text, color, drawnBy: 'user' }))
@@ -916,6 +930,8 @@ ${boardImg}
 	useEffect(() => {
 		const onKey = (e: KeyboardEvent) => {
 			if (editing) return // 輸入卡片文字時不攔任何快捷鍵
+			// 唯讀檢視:刪除與 undo/redo 不動板(搜尋/Esc 照常);寫入封鎖本體在 server
+			if (READ_ONLY && (e.key === 'Delete' || e.key === 'Backspace' || ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z'))) return
 			const mod = e.ctrlKey || e.metaKey
 			if (mod && e.key.toLowerCase() === 'f') {
 				// 攔下瀏覽器內建搜尋,開卡片搜尋列(已開著就重新聚焦)
@@ -1007,6 +1023,44 @@ ${boardImg}
 		await fetch(`${SYNC_HTTP}/api/rooms/${encodeURIComponent(room)}/end`, { method: 'POST' }).catch(() => {})
 	}
 
+	// 房主與鎖板:第一個進房的人自動認領鑰匙(server 先到先得);鎖板後其他人的寫入在 ws 層被丟棄
+	const [roomLocked, setRoomLocked] = useState(false)
+	useEffect(() => {
+		if (status !== 'synced') return
+		;(async () => {
+			const m = await fetch(`${SYNC_HTTP}/api/rooms/${encodeURIComponent(room)}/meta`).then((r) => r.json()).catch(() => null)
+			if (!m?.ok) return
+			setRoomLocked(!!m.locked)
+			const key = localStorage.getItem(`wb-owner-${room}`)
+			if (!m.hasOwner && key && !READ_ONLY) {
+				await fetch(`${SYNC_HTTP}/api/rooms/${encodeURIComponent(room)}/claim`, {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ key }),
+				}).catch(() => null)
+			}
+		})()
+	}, [status])
+	async function toggleLock() {
+		const key = localStorage.getItem(`wb-owner-${room}`) || ''
+		const r = await fetch(`${SYNC_HTTP}/api/rooms/${encodeURIComponent(room)}/lock`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ key, locked: !roomLocked }),
+		}).then((x) => x.json()).catch(() => null)
+		if (r?.ok) {
+			setRoomLocked(!!r.locked)
+			setBusy(r.locked ? '已鎖定:其他人變唯讀,只有你能編輯' : '已解除鎖定:大家都能編輯')
+		} else setBusy(r?.error || '鎖定失敗')
+	}
+	function copyViewLink() {
+		const url = `${shareUrl}&view=1`
+		navigator.clipboard
+			?.writeText(url)
+			.then(() => setBusy('已複製唯讀連結:打開的人只能看,不能改'))
+			.catch(() => window.prompt('複製這條唯讀連結:', url))
+	}
+
 	const byId = (id: string) => shapes.find((s) => s.id === id)
 	const matchesFilter = (s: Sticky) =>
 		!filter ||
@@ -1091,6 +1145,7 @@ ${boardImg}
 	}
 
 	function onStageDblClick(e: any) {
+		if (READ_ONLY) return
 		// only when clicking empty canvas (target is the stage itself)
 		if (e.target !== e.target.getStage()) return
 		// relative pointer position accounts for pan/zoom -> canvas coords
@@ -1910,7 +1965,7 @@ ${boardImg}
 								cornerRadius={[18, 18, 0, 0]}
 								fill={ct.frameHeader}
 								{...PERF}
-								draggable
+								draggable={!READ_ONLY}
 								onDragMove={(e: any) => {
 									const dx = e.target.x() - f.x
 									const dy = e.target.y() - f.y
@@ -1964,7 +2019,7 @@ ${boardImg}
 								stroke={ct.handleStroke}
 								strokeWidth={1.5}
 								{...PERF}
-								draggable
+								draggable={!READ_ONLY}
 								onDragMove={(e: any) => {
 									const w = Math.max(280, e.target.x() - f.x + 20)
 									const h = Math.max(200, e.target.y() - f.y + 20)
@@ -2026,7 +2081,7 @@ ${boardImg}
 								key={s.id}
 								x={s.x}
 								y={s.y}
-								draggable
+								draggable={!READ_ONLY}
 								opacity={matchesFilter(s) ? 1 : 0.16} onDragStart={() => setSelectedId(s.id)}
 								onDragMove={(e: any) => {
 									const now = Date.now()
@@ -2045,6 +2100,7 @@ ${boardImg}
 								onTap={() => onStickyClick(s)}
 								onDblClick={(e: any) => {
 									e.cancelBubble = true
+									if (READ_ONLY) return
 									setEditing({ id: s.id, value: s.text })
 								}}
 							>
@@ -2302,6 +2358,7 @@ ${boardImg}
 					<span className="muted" style={{ fontSize: 12 }}>房號</span>
 					<span className="code" style={{ fontSize: 19, color: 'var(--accent)', marginRight: 2 }}>{room}</span>
 					{meeting && <span className="rec-dot live" title="會議記錄中" style={{ marginRight: 0 }} />}
+					{READ_ONLY && <span className="muted" style={{ fontSize: 12, border: '1px solid var(--line)', borderRadius: 999, padding: '1px 9px' }}>唯讀檢視</span>}
 					<button title="分享這間會議室:QR、房號、邀請連結" className="btn-accent" data-tour="share" onClick={() => { maybeAskName(); setShareOpen(true) }}>分享 / QR</button>
 					<span className="muted" style={{ fontSize: 12 }} title={status === 'synced' ? '已即時連線' : statusZh(status)}>
 						{statusZh(status)} · {shapes.length} 張
@@ -2372,7 +2429,7 @@ ${boardImg}
 			)}
 
 			{/* canvas tools (left strip, Photoshop-style) */}
-			<div className="toolstrip float-in">
+			{!READ_ONLY && (<div className="toolstrip float-in">
 				<button className="tool" title="新增一張空白便利貼(也可雙擊白板空白處)" onClick={() => addSticky(140, 140, '', 'yellow') && undefined}><Ico><path d="M16 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h9l6-6V5a2 2 0 0 0-2-2Z"/><path d="M14 21v-5a1 1 0 0 1 1-1h5"/></Ico>便利貼</button>
 				<button className="tool" title="新增一張備註。任何圖表都能貼;自動排列與 AI 都不會動它。" style={{ background: COLORS.note, borderColor: KIND_ACCENT.note, color: '#4a3a6e' }} onClick={() => addNote(180, 180) && undefined}><Ico><path d="M3 11.5V5a2 2 0 0 1 2-2h6.5a2 2 0 0 1 1.4.6l7.5 7.5a2 2 0 0 1 0 2.8l-6.6 6.6a2 2 0 0 1-2.8 0L3.6 12.9A2 2 0 0 1 3 11.5Z"/><circle cx="7.5" cy="7.5" r="1.1" fill="currentColor" stroke="none"/></Ico>備註</button>
 				<button className="tool" title="手動新增一張圖(AI 也會在切新主題時自動開)" onClick={() => setTypePickerOpen(true)}><Ico><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M12 8v8M8 12h8"/></Ico>新圖{frames.length ? `·${frames.length}` : ''}</button>
@@ -2383,7 +2440,7 @@ ${boardImg}
 				<button className="tool" title="復原 Ctrl+Z" onClick={() => undoMgr.undo()}><Ico><path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 5 5 5 5 0 0 1-5 5h-4"/></Ico>復原</button>
 				<button className="tool" title="重做 Ctrl+Shift+Z" onClick={() => undoMgr.redo()}><Ico><path d="m15 14 5-5-5-5"/><path d="M20 9H9a5 5 0 0 0-5 5 5 5 0 0 0 5 5h4"/></Ico>重做</button>
 				<button className="tool" disabled={!selectedId && !selectedConnId} title="刪除選取的便利貼或連線(Delete)" onClick={() => { if (selectedId) deleteSticky(selectedId); else if (selectedConnId) deleteConnector(selectedConnId) }}><Ico><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></Ico>刪除</button>
-			</div>
+			</div>)}
 
 			{/* app / view (top-right) — desktop only; on mobile these live in the ⋯ menu */}
 			{!mobile && (
@@ -2399,7 +2456,8 @@ ${boardImg}
 			)}
 
 			{/* contextual color + delete popover for a selected sticky */}
-			{selectedId &&
+			{!READ_ONLY &&
+				selectedId &&
 				byId(selectedId) &&
 				(() => {
 					const s = byId(selectedId)!
@@ -2756,7 +2814,7 @@ ${boardImg}
 				)}
 
 				{/* agent / voice panel (collapsible; record stays visible) */}
-			<div className="glass float-in" data-tour="paste" style={{ ...panel, width: mobile ? 'min(86vw, 320px)' : 320, left: mobile ? 8 : 14 }}>
+			{!READ_ONLY && (<div className="glass float-in" data-tour="paste" style={{ ...panel, width: mobile ? 'min(86vw, 320px)' : 320, left: mobile ? 8 : 14 }}>
 				<div
 					onClick={() => setPanelOpen((o) => !o)}
 					style={{ fontWeight: 600, cursor: 'pointer', userSelect: 'none' }}
@@ -2848,7 +2906,11 @@ ${boardImg}
 					</button>
 				)}
 				{busy && <div style={{ marginTop: 6, fontSize: 12, color: 'var(--ink-soft)' }}>{busy}</div>}
-			</div>
+			</div>)}
+			{/* 唯讀檢視沒有開會記錄面板,busy 提示改浮在左下 */}
+			{READ_ONLY && busy && (
+				<div className="glass" style={{ position: 'fixed', left: 14, bottom: 14, zIndex: 1200, padding: '8px 14px', fontSize: 12.5, color: 'var(--ink-soft)' }}>{busy}</div>
+			)}
 
 			{/* share modal: QR + 房號 + join-by-code */}
 			{shareOpen && (
@@ -2947,10 +3009,29 @@ ${boardImg}
 								目前 {roomCount} 個房間進行中(此站不公開房號,知道房號才能加入)
 							</div>
 						) : null}
-						<div style={{ display: 'flex', gap: 6, marginTop: 14 }}>
-							<button style={{ ...btn, flex: 1, color: 'var(--live)' }} onClick={endThisRoom}>
-								結束此房(清空)
-							</button>
+						{!READ_ONLY && (
+							<div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
+								<button style={{ ...btn, flex: 1 }} title="打開的人只能看:編輯 UI 隱藏,寫入也會被伺服器丟棄" onClick={copyViewLink}>
+									複製唯讀連結
+								</button>
+								<button
+									style={{ ...btn, flex: 1, ...(roomLocked ? { borderColor: 'var(--accent)', color: 'var(--accent)' } : {}) }}
+									title={roomLocked ? '解除後大家都能編輯' : '鎖定後只有你(房主)能編輯,其他人唯讀'}
+									onClick={toggleLock}
+								>
+									{roomLocked ? '解除鎖定' : '鎖定白板'}
+								</button>
+							</div>
+						)}
+						{roomLocked && (
+							<div className="muted" style={{ marginTop: 6, fontSize: 12 }}>此板已鎖定:目前只有房主能編輯</div>
+						)}
+						<div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
+							{!READ_ONLY && (
+								<button style={{ ...btn, flex: 1, color: 'var(--live)' }} onClick={endThisRoom}>
+									結束此房(清空)
+								</button>
+							)}
 							<button style={{ ...btn, flex: 1 }} onClick={() => setShareOpen(false)}>
 								關閉
 							</button>
