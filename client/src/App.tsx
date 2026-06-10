@@ -252,6 +252,12 @@ export default function App() {
 	}, [shapes])
 	const [selectedConnId, setSelectedConnId] = useState<string | null>(null)
 	const [filter, setFilter] = useState<{ type: 'tag' | 'owner'; value: string } | null>(null)
+	// Ctrl+F 卡片搜尋:比對 text / owner / tags,Enter 逐筆跳到該卡並短暫高亮
+	const [searchOpen, setSearchOpen] = useState(false)
+	const [searchQ, setSearchQ] = useState('')
+	const [searchIdx, setSearchIdx] = useState(0)
+	const searchInputRef = useRef<HTMLInputElement>(null)
+	const searchFlashTimer = useRef<any>(null)
 	const [connectMode, setConnectMode] = useState(false)
 	const [connectFrom, setConnectFrom] = useState<string | null>(null)
 	const [editing, setEditing] = useState<{ id: string; value: string } | null>(null)
@@ -713,8 +719,21 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 	// keyboard: undo/redo + delete (but not while editing text)
 	useEffect(() => {
 		const onKey = (e: KeyboardEvent) => {
-			if (editing) return
+			if (editing) return // 輸入卡片文字時不攔任何快捷鍵
 			const mod = e.ctrlKey || e.metaKey
+			if (mod && e.key.toLowerCase() === 'f') {
+				// 攔下瀏覽器內建搜尋,開卡片搜尋列(已開著就重新聚焦)
+				e.preventDefault()
+				setSearchOpen(true)
+				searchInputRef.current?.select()
+				return
+			}
+			// 焦點在輸入框(搜尋列、改名、負責人…)時,其餘板面快捷鍵全部不攔
+			const el = e.target as HTMLElement | null
+			if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) {
+				if (e.key === 'Escape' && searchOpen) closeSearch()
+				return
+			}
 			if (mod && e.key.toLowerCase() === 'z') {
 				e.preventDefault()
 				if (e.shiftKey) undoMgr.redo()
@@ -738,6 +757,7 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 				}
 			}
 			if (e.key === 'Escape') {
+				if (searchOpen) closeSearch()
 				setSelectedId(null)
 				setSelectedConnId(null)
 				setConnectFrom(null)
@@ -745,7 +765,7 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 		}
 		window.addEventListener('keydown', onKey)
 		return () => window.removeEventListener('keydown', onKey)
-	}, [selectedId, selectedConnId, editing, undoMgr])
+	}, [selectedId, selectedConnId, editing, undoMgr, searchOpen])
 
 	useEffect(() => {
 		if (editing) editRef.current?.focus()
@@ -791,6 +811,42 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 	const matchesFilter = (s: Sticky) =>
 		!filter ||
 		(filter.type === 'tag' ? (s.tags || []).includes(filter.value) : s.owner === filter.value || s.drawnBy === filter.value)
+	// 搜尋命中清單(不分大小寫,比對 text / owner / tags)
+	const searchHits = useMemo(() => {
+		const q = searchQ.trim().toLowerCase()
+		if (!q) return [] as Sticky[]
+		return shapes.filter(
+			(s) =>
+				(s.text || '').toLowerCase().includes(q) ||
+				(s.owner || '').toLowerCase().includes(q) ||
+				(s.tags || []).some((t) => t.toLowerCase().includes(q))
+		)
+	}, [shapes, searchQ])
+	// 跳到第 i 筆命中:平移視圖(維持目前縮放)讓該卡置中,並借用 selected 樣式短暫高亮
+	function focusHit(i: number) {
+		const n = searchHits.length
+		if (!n) return
+		const idx = ((i % n) + n) % n
+		setSearchIdx(idx)
+		const s = searchHits[idx]
+		const scale = view.scale || 1
+		setView({ scale, x: size.w / 2 - (s.x + s.w / 2) * scale, y: size.h / 2 - (s.y + s.h / 2) * scale })
+		setSelectedId(s.id)
+		clearTimeout(searchFlashTimer.current)
+		searchFlashTimer.current = setTimeout(() => setSelectedId((cur) => (cur === s.id ? null : cur)), 1600)
+	}
+	function closeSearch() {
+		setSearchOpen(false)
+		setSearchQ('')
+		setSearchIdx(0)
+	}
+	// 邊打邊跳:查詢字串一變就跳到第一筆命中(只跟 searchQ,不跟遠端 shapes 變動)
+	useEffect(() => {
+		if (!searchOpen || !searchQ.trim()) return
+		if (searchHits.length) focusHit(0)
+		else setSearchIdx(0)
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [searchQ])
 	// which frame (diagram) contains a canvas point — topmost wins
 	const frameAt = (cx: number, cy: number) => {
 		for (let i = frames.length - 1; i >= 0; i--) {
@@ -2014,6 +2070,35 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 					{status === 'disconnected'
 						? '已斷線,正在重連 — 放心,這段期間的編輯會在連回後自動同步'
 						: '主機喚醒中…(免費示範站閒置會休眠,第一次連上約需 30 秒)'}
+				</div>
+			)}
+
+			{/* Ctrl+F 卡片搜尋列(固定頂部置中,Esc 關閉) */}
+			{searchOpen && (
+				<div
+					className="glass float-in"
+					style={{ position: 'fixed', top: mobile ? 'calc(52px + env(safe-area-inset-top, 0px))' : 64, left: 0, right: 0, marginInline: 'auto', width: 'fit-content', maxWidth: '94vw', zIndex: 2300, display: 'flex', gap: 7, alignItems: 'center', padding: '6px 10px', fontSize: 13 }}
+				>
+					<input
+						ref={searchInputRef}
+						autoFocus
+						value={searchQ}
+						onChange={(e) => setSearchQ(e.target.value)}
+						onKeyDown={(e) => {
+							if (e.key === 'Enter') {
+								e.preventDefault()
+								focusHit(searchIdx + (e.shiftKey ? -1 : 1))
+							}
+						}}
+						placeholder="搜尋卡片:文字 / 負責人 / 標籤"
+						style={{ width: mobile ? 150 : 210, fontSize: 13, padding: '5px 9px' }}
+					/>
+					<span className="muted" style={{ fontSize: 12, whiteSpace: 'nowrap', minWidth: 60, textAlign: 'center' }}>
+						{searchHits.length ? `第 ${Math.min(searchIdx, searchHits.length - 1) + 1} / ${searchHits.length} 筆` : searchQ.trim() ? '沒有符合' : ''}
+					</span>
+					<button style={{ padding: '3px 9px' }} title="上一筆(Shift+Enter)" disabled={!searchHits.length} onClick={() => focusHit(searchIdx - 1)}>↑</button>
+					<button style={{ padding: '3px 9px' }} title="下一筆(Enter)" disabled={!searchHits.length} onClick={() => focusHit(searchIdx + 1)}>↓</button>
+					<button style={{ padding: '3px 9px' }} title="關閉(Esc)" onClick={closeSearch}>✕</button>
 				</div>
 			)}
 
