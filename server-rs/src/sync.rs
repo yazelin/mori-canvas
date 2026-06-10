@@ -17,6 +17,8 @@ use yrs_warp::AwarenessRef;
 pub struct Room {
     pub awareness: AwarenessRef,
     pub bcast: Arc<BroadcastGroup>,
+    /// 目前連著的 websocket 數(分頁數);/api/rooms 的「N 人」就是這個
+    pub online: std::sync::atomic::AtomicUsize,
     _sub: yrs::Subscription,
 }
 pub type Rooms = Arc<RwLock<HashMap<String, Arc<Room>>>>;
@@ -108,13 +110,28 @@ pub async fn get_or_create_room(rooms: &Rooms, name: &str) -> Arc<Room> {
     let room = Arc::new(Room {
         awareness,
         bcast,
+        online: std::sync::atomic::AtomicUsize::new(0),
         _sub: sub,
     });
     w.insert(name.to_string(), room.clone());
     room
 }
 
+/// 連線計數的 drop guard:不管是正常關閉、ws 錯誤、還是 task 被 hyper 中途丟掉,
+/// guard 一定會 drop → 計數一定會減,不會越加越多。
+struct OnlineGuard(Arc<Room>);
+impl Drop for OnlineGuard {
+    fn drop(&mut self) {
+        self.0
+            .online
+            .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
 pub async fn peer(ws: WebSocket, room: Arc<Room>) {
+    room.online
+        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let _guard = OnlineGuard(room.clone());
     let (sink, stream) = ws.split();
     let sink = Arc::new(Mutex::new(WarpSink::from(sink)));
     let stream = WarpStream::from(stream);
