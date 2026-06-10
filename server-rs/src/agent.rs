@@ -530,9 +530,12 @@ pub async fn plan_agent(
     } else {
         format!("\n\n剛才的會議逐字稿(脈絡,最新在最後;用來理解現在這句話在討論什麼,別把它當成新內容重複建卡):\n{}", context.join("\n"))
     };
-    let user = format!(
-        "使用者這段話(三引號內,可能是會議內容、也可能是給你的指令):\n\"\"\"\n{}\n\"\"\"{}{}{}{}{}",
-        transcript, ctx_block, topic_block, frames_block, ref_block, existing_block
+    let user = crate::llm::with_user_lang(
+        format!(
+            "使用者這段話(三引號內,可能是會議內容、也可能是給你的指令):\n\"\"\"\n{}\n\"\"\"{}{}{}{}{}",
+            transcript, ctx_block, topic_block, frames_block, ref_block, existing_block
+        ),
+        llm.lang,
     );
     let messages = vec![
         Msg {

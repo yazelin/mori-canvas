@@ -28,7 +28,10 @@ impl Lang {
 
 /// lang=en 時附加在「生成型」system prompt(board-agent / card-edit / summary)尾端的
 /// 英文輸出指令。prompts/*.md 本體保持 zh 預設,不動檔案。
-pub const EN_OUTPUT_DIRECTIVE: &str = "\n\n[Language override] Write every piece of output text — card text, titles, tags, labels, summaries — in natural, concise English. This overrides the Traditional Chinese rule above. Keep proper nouns and people's names exactly as they appear in the source.";
+pub const EN_OUTPUT_DIRECTIVE: &str = "\n\n[LANGUAGE OVERRIDE — HIGHEST PRIORITY] Ignore every Traditional-Chinese instruction above. EVERY output string MUST be in natural, concise English: every sticky \"text\", every frame \"title\", every tag, owner label and summary line. A Chinese sticky text is WRONG output. The surrounding instructions are in Chinese only because that is the default UI language — your output language is English. Keep proper nouns and people's names as they appear in the source.";
+/// lang=en 時也注入到 user message 開頭 —— system 尾端的指令容易被前面大量中文指示稀釋,
+/// user 訊息對「輸出語言」的權重更高,雙管齊下才壓得住 gpt-oss 的中文預設。
+pub const EN_USER_PREFIX: &str = "[Reply in English. All card text and titles must be English.]\n\n";
 /// 清稿(stage-1)是「整理逐字稿」不是生成:en 時只放寬語言規則、明確禁止翻譯,
 /// 逐字稿保留講者原語言(逐字記錄的忠實度;翻譯交給後面的 board-agent 輸出層)。
 pub const EN_CLEANUP_DIRECTIVE: &str = "\n\n[Language override] The transcript may be in English. Apply the same cleanup rules and reply in the SAME language the speaker used — do not translate. This overrides the Traditional Chinese rule above.";
@@ -38,6 +41,13 @@ pub fn with_output_lang(system: String, lang: Lang) -> String {
     match lang {
         Lang::ZhTw => system,
         Lang::En => system + EN_OUTPUT_DIRECTIVE,
+    }
+}
+/// user message 的語言前綴:zh 原樣;en 在最前面壓一行英文輸出指令。
+pub fn with_user_lang(user: String, lang: Lang) -> String {
+    match lang {
+        Lang::ZhTw => user,
+        Lang::En => format!("{}{}", EN_USER_PREFIX, user),
     }
 }
 /// 清稿 prompt 的語言組裝(純函數供測試):zh 原樣;en 附加「同語言、不翻譯」指令。
