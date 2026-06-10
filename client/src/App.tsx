@@ -330,6 +330,16 @@ export default function App() {
 		[]
 	)
 	const me = useMemo(() => ({ name: myName, color: myColor }), [myName, myColor])
+	// 「先看看就好」的延後補問:第一次錄音/建卡/開分享(名字的價值此刻才成立)再問一次,只問這一次
+	const nameReasked = useRef(false)
+	function maybeAskName(): boolean {
+		if (!nameReasked.current && myName.startsWith('訪客')) {
+			nameReasked.current = true
+			setNeedName(true)
+			return true
+		}
+		return false
+	}
 	// append a recognised speech segment to the shared word-for-word meeting log
 	const logTranscript = (text: string) => {
 		const t = (text || '').trim()
@@ -383,6 +393,7 @@ export default function App() {
 		})
 	}
 	const addSticky = (x: number, y: number, text = '', color = 'yellow') => {
+		maybeAskName() // 不擋建卡,只順勢補問一次
 		const id = `sticky-${Math.random().toString(36).slice(2, 10)}`
 		tx(() => yShapes.set(id, { id, x, y, w: 200, h: 200, text, color, drawnBy: 'user' }))
 		return id
@@ -1089,6 +1100,7 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 	}
 
 	async function startMeeting() {
+		if (maybeAskName()) return // 補問名字(卡片要標「誰提的」);填完或再按一次就開錄
 		if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
 			setBusy(`麥克風被瀏覽器擋:此頁是 ${location.protocol}//${location.host},要 localhost 或 HTTPS。`)
 			return
@@ -1295,9 +1307,9 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 			{needName && (
 				<div className="scrim" style={{ zIndex: 3800 }}>
 					<div className="dialog-card modal-in" style={{ width: 'min(380px, 92vw)', textAlign: 'center' }}>
-						<div style={{ fontSize: 30, lineHeight: 1, marginBottom: 8 }}>👋</div>
+						<div style={{ fontFamily: 'Fraunces, serif', fontSize: 26, lineHeight: 1, marginBottom: 8, color: 'var(--accent)' }}>Mori Canvas</div>
 						<div style={{ fontWeight: 700, fontSize: 18 }}>歡迎加入會議</div>
-						<div className="muted" style={{ fontSize: 13, margin: '6px 0 16px' }}>先打個名字,白板上的卡片與游標才標得出是你</div>
+						<div className="muted" style={{ fontSize: 13, margin: '6px 0 16px' }}>打個名字,白板上的卡片與游標才標得出是你</div>
 						<input
 							autoFocus
 							value={nameDraft}
@@ -1321,6 +1333,15 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 							}}
 						>
 							進入會議
+						</button>
+						<button
+							style={{ width: '100%', marginTop: 8, padding: '9px', fontSize: 13, background: 'transparent', border: 'none', color: 'var(--ink-soft)', cursor: 'pointer', textDecoration: 'underline' }}
+							onClick={() => {
+								// 先逛再說:用訪客身分進場;第一次錄音/建卡/分享時才會再問一次
+								setNeedName(false)
+							}}
+						>
+							先看看就好
 						</button>
 					</div>
 				</div>
@@ -1914,7 +1935,7 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 					<div className="glass float-in" style={{ position: 'fixed', top: 'calc(8px + env(safe-area-inset-top, 0px))', left: 'calc(8px + env(safe-area-inset-left, 0px))', right: 'calc(8px + env(safe-area-inset-right, 0px))', zIndex: 1000, display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', fontSize: 13 }}>
 						<span className="code" style={{ fontSize: 17, color: 'var(--accent)' }}>{room}</span>
 						{meeting && <span className="rec-dot live" title="會議記錄中" style={{ marginRight: 0 }} />}
-						<button className="btn-accent" style={{ padding: '5px 11px' }} data-tour="share" onClick={() => setShareOpen(true)}>分享</button>
+						<button className="btn-accent" style={{ padding: '5px 11px' }} data-tour="share" onClick={() => { maybeAskName(); setShareOpen(true) }}>分享</button>
 						<span style={{ flex: 1 }} />
 						<span className="muted" style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{statusZh(status)}·{shapes.length}</span>
 						<button style={btn} title="更多" onClick={() => setMenuOpen((v) => !v)}>⋯</button>
@@ -1939,7 +1960,7 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 					<span className="muted" style={{ fontSize: 12 }}>房號</span>
 					<span className="code" style={{ fontSize: 19, color: 'var(--accent)', marginRight: 2 }}>{room}</span>
 					{meeting && <span className="rec-dot live" title="會議記錄中" style={{ marginRight: 0 }} />}
-					<button title="分享這間會議室:QR、房號、邀請連結" className="btn-accent" data-tour="share" onClick={() => setShareOpen(true)}>分享 / QR</button>
+					<button title="分享這間會議室:QR、房號、邀請連結" className="btn-accent" data-tour="share" onClick={() => { maybeAskName(); setShareOpen(true) }}>分享 / QR</button>
 					<span className="muted" style={{ fontSize: 12 }} title={status === 'synced' ? '已即時連線' : statusZh(status)}>
 						{statusZh(status)} · {shapes.length} 張
 					</span>
