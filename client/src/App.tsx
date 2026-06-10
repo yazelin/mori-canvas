@@ -3,6 +3,7 @@ import { Stage, Layer, Group, Rect, Text, Arrow, Circle } from 'react-konva'
 import * as Y from 'yjs'
 import { WebsocketProvider } from 'y-websocket'
 import QRCode from 'qrcode'
+import { fitCardSize, BASE_FONT } from './fitCardSize'
 
 type Sticky = {
 	id: string
@@ -18,6 +19,7 @@ type Sticky = {
 	frameId?: string // 屬於哪張圖框;無 = 自由卡
 	note?: boolean // 備註卡:自動排列與 AI 都不動它
 	type?: string // yjs 物件種別(sticky)
+	fontSize?: number // 自動高度時可能縮的字級;無 = 預設 19
 }
 type Connector = { id: string; from: string; to: string }
 
@@ -202,7 +204,8 @@ export default function App() {
 		const yFrames = doc.getMap<any>('frames') // diagrams on the canvas
 		const yTranscript = doc.getArray<any>('transcript') // running word-for-word meeting log
 		const LOCAL = { local: true } // origin tag so undo only tracks MY edits, not remote/Mori
-		const undoMgr = new Y.UndoManager([yShapes, yConnectors], { trackedOrigins: new Set([LOCAL]) })
+		// yFrames is in scope so deleting/moving/renaming a frame is undoable too
+		const undoMgr = new Y.UndoManager([yShapes, yConnectors, yFrames], { trackedOrigins: new Set([LOCAL]) })
 		;(window as any).__getShapes = () => Array.from(yShapes.values())
 		;(window as any).__getConnectors = () => Array.from(yConnectors.values())
 		;(window as any).__getFrames = () => Array.from(yFrames.values())
@@ -251,6 +254,12 @@ export default function App() {
 	}, [shapes])
 	const [selectedConnId, setSelectedConnId] = useState<string | null>(null)
 	const [filter, setFilter] = useState<{ type: 'tag' | 'owner'; value: string } | null>(null)
+	// Ctrl+F 卡片搜尋:比對 text / owner / tags,Enter 逐筆跳到該卡並短暫高亮
+	const [searchOpen, setSearchOpen] = useState(false)
+	const [searchQ, setSearchQ] = useState('')
+	const [searchIdx, setSearchIdx] = useState(0)
+	const searchInputRef = useRef<HTMLInputElement>(null)
+	const searchFlashTimer = useRef<any>(null)
 	const [connectMode, setConnectMode] = useState(false)
 	const [connectFrom, setConnectFrom] = useState<string | null>(null)
 	const [editing, setEditing] = useState<{ id: string; value: string } | null>(null)
@@ -258,6 +267,8 @@ export default function App() {
 	const [agentText, setAgentText] = useState('') // manual-transcript draft (local only, not synced)
 	const [showPaste, setShowPaste] = useState(false) // the paste-transcript option is hidden by default
 	const [busy, setBusy] = useState('')
+	// 最近一輪 AI 新增的卡 id(誠實範圍:只含「新增」;AI 的修改/刪除 UndoManager 不追遠端,不在此列)
+	const [lastAiIds, setLastAiIds] = useState<string[]>([])
 	const editRef = useRef<HTMLTextAreaElement>(null)
 	const stageRef = useRef<any>(null)
 	const dragTs = useRef(0)
@@ -710,8 +721,21 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 	// keyboard: undo/redo + delete (but not while editing text)
 	useEffect(() => {
 		const onKey = (e: KeyboardEvent) => {
-			if (editing) return
+			if (editing) return // 輸入卡片文字時不攔任何快捷鍵
 			const mod = e.ctrlKey || e.metaKey
+			if (mod && e.key.toLowerCase() === 'f') {
+				// 攔下瀏覽器內建搜尋,開卡片搜尋列(已開著就重新聚焦)
+				e.preventDefault()
+				setSearchOpen(true)
+				searchInputRef.current?.select()
+				return
+			}
+			// 焦點在輸入框(搜尋列、改名、負責人…)時,其餘板面快捷鍵全部不攔
+			const el = e.target as HTMLElement | null
+			if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) {
+				if (e.key === 'Escape' && searchOpen) closeSearch()
+				return
+			}
 			if (mod && e.key.toLowerCase() === 'z') {
 				e.preventDefault()
 				if (e.shiftKey) undoMgr.redo()
@@ -735,6 +759,7 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 				}
 			}
 			if (e.key === 'Escape') {
+				if (searchOpen) closeSearch()
 				setSelectedId(null)
 				setSelectedConnId(null)
 				setConnectFrom(null)
@@ -742,7 +767,7 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 		}
 		window.addEventListener('keydown', onKey)
 		return () => window.removeEventListener('keydown', onKey)
-	}, [selectedId, selectedConnId, editing, undoMgr])
+	}, [selectedId, selectedConnId, editing, undoMgr, searchOpen])
 
 	useEffect(() => {
 		if (editing) editRef.current?.focus()
@@ -788,6 +813,42 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 	const matchesFilter = (s: Sticky) =>
 		!filter ||
 		(filter.type === 'tag' ? (s.tags || []).includes(filter.value) : s.owner === filter.value || s.drawnBy === filter.value)
+	// 搜尋命中清單(不分大小寫,比對 text / owner / tags)
+	const searchHits = useMemo(() => {
+		const q = searchQ.trim().toLowerCase()
+		if (!q) return [] as Sticky[]
+		return shapes.filter(
+			(s) =>
+				(s.text || '').toLowerCase().includes(q) ||
+				(s.owner || '').toLowerCase().includes(q) ||
+				(s.tags || []).some((t) => t.toLowerCase().includes(q))
+		)
+	}, [shapes, searchQ])
+	// 跳到第 i 筆命中:平移視圖(維持目前縮放)讓該卡置中,並借用 selected 樣式短暫高亮
+	function focusHit(i: number) {
+		const n = searchHits.length
+		if (!n) return
+		const idx = ((i % n) + n) % n
+		setSearchIdx(idx)
+		const s = searchHits[idx]
+		const scale = view.scale || 1
+		setView({ scale, x: size.w / 2 - (s.x + s.w / 2) * scale, y: size.h / 2 - (s.y + s.h / 2) * scale })
+		setSelectedId(s.id)
+		clearTimeout(searchFlashTimer.current)
+		searchFlashTimer.current = setTimeout(() => setSelectedId((cur) => (cur === s.id ? null : cur)), 1600)
+	}
+	function closeSearch() {
+		setSearchOpen(false)
+		setSearchQ('')
+		setSearchIdx(0)
+	}
+	// 邊打邊跳:查詢字串一變就跳到第一筆命中(只跟 searchQ,不跟遠端 shapes 變動)
+	useEffect(() => {
+		if (!searchOpen || !searchQ.trim()) return
+		if (searchHits.length) focusHit(0)
+		else setSearchIdx(0)
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [searchQ])
 	// which frame (diagram) contains a canvas point — topmost wins
 	const frameAt = (cx: number, cy: number) => {
 		for (let i = frames.length - 1; i >= 0; i--) {
@@ -880,7 +941,21 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 		} else {
 			const fl = r.frameLabel ? `${r.frameLabel} · ` : ''
 			setBusy(`${prefix}${fl}+${r.added?.length ?? r.stickies ?? 0} 張、+${r.connectors ?? 0} 連線`)
+			// 每一輪 content 回應都更新「上一輪 AI 新增」清單(被跳過的段落沒有 ids,不動清單)
+			if (Array.isArray(r.ids)) setLastAiIds(r.ids)
 		}
+	}
+	// 撤銷上一輪 AI:移除那一輪新增的卡與其相關連線(AI 的修改/刪除不在此列)
+	function undoLastAi() {
+		const ids = new Set(lastAiIds.filter((id) => yShapes.has(id)))
+		if (ids.size) {
+			tx(() => {
+				for (const [cid, c] of yConnectors) if (ids.has(c.from) || ids.has(c.to)) yConnectors.delete(cid)
+				for (const id of ids) yShapes.delete(id)
+			})
+		}
+		setLastAiIds([])
+		setBusy(ids.size ? `已移除上一輪 AI 新增的 ${ids.size} 張卡` : '上一輪 AI 新增的卡已不在板上')
 	}
 	async function addFrame(type: string, title: string) {
 		await fetch(`${SYNC_HTTP}/api/rooms/${encodeURIComponent(room)}/frames`, {
@@ -1754,7 +1829,7 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 									width={s.w}
 									height={s.h}
 									padding={20}
-									fontSize={19}
+									fontSize={s.fontSize || BASE_FONT}
 									lineHeight={1.25}
 									fontFamily={CANVAS_FONT}
 									fontStyle="500"
@@ -1863,7 +1938,9 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 							value={editing.value}
 							onChange={(e) => setEditing({ id: editing.id, value: e.target.value })}
 							onBlur={() => {
-								patchShape(editing.id, { text: editing.value })
+								// 提交文字時依內容自動調卡高與字級(只影響手動輸入;AI 建卡文字短,走 server 的 200x200)
+								const { h, fontSize } = fitCardSize(editing.value, s.w)
+								patchShape(editing.id, { text: editing.value, h, fontSize })
 								setEditing(null)
 							}}
 							onKeyDown={(e) => {
@@ -1997,6 +2074,35 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 					{status === 'disconnected'
 						? '已斷線,正在重連 — 放心,這段期間的編輯會在連回後自動同步'
 						: '主機喚醒中…(免費示範站閒置會休眠,第一次連上約需 30 秒)'}
+				</div>
+			)}
+
+			{/* Ctrl+F 卡片搜尋列(固定頂部置中,Esc 關閉) */}
+			{searchOpen && (
+				<div
+					className="glass float-in"
+					style={{ position: 'fixed', top: mobile ? 'calc(52px + env(safe-area-inset-top, 0px))' : 64, left: 0, right: 0, marginInline: 'auto', width: 'fit-content', maxWidth: '94vw', zIndex: 2300, display: 'flex', gap: 7, alignItems: 'center', padding: '6px 10px', fontSize: 13 }}
+				>
+					<input
+						ref={searchInputRef}
+						autoFocus
+						value={searchQ}
+						onChange={(e) => setSearchQ(e.target.value)}
+						onKeyDown={(e) => {
+							if (e.key === 'Enter') {
+								e.preventDefault()
+								focusHit(searchIdx + (e.shiftKey ? -1 : 1))
+							}
+						}}
+						placeholder="搜尋卡片:文字 / 負責人 / 標籤"
+						style={{ width: mobile ? 150 : 210, fontSize: 13, padding: '5px 9px' }}
+					/>
+					<span className="muted" style={{ fontSize: 12, whiteSpace: 'nowrap', minWidth: 60, textAlign: 'center' }}>
+						{searchHits.length ? `第 ${Math.min(searchIdx, searchHits.length - 1) + 1} / ${searchHits.length} 筆` : searchQ.trim() ? '沒有符合' : ''}
+					</span>
+					<button style={{ padding: '3px 9px' }} title="上一筆(Shift+Enter)" disabled={!searchHits.length} onClick={() => focusHit(searchIdx - 1)}>↑</button>
+					<button style={{ padding: '3px 9px' }} title="下一筆(Enter)" disabled={!searchHits.length} onClick={() => focusHit(searchIdx + 1)}>↓</button>
+					<button style={{ padding: '3px 9px' }} title="關閉(Esc)" onClick={closeSearch}>✕</button>
 				</div>
 			)}
 
@@ -2441,6 +2547,16 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 							<div ref={transcriptEndRef} />
 						</div>
 					</div>
+				)}
+				{lastAiIds.length > 0 && (
+					<button
+						className="btn-soft"
+						style={{ width: '100%', marginTop: 6, fontSize: 12 }}
+						title="移除上一輪 AI 新增的卡與連線(AI 對既有卡的修改與刪除不在此列)"
+						onClick={undoLastAi}
+					>
+						撤銷上輪 AI({lastAiIds.length} 張)
+					</button>
 				)}
 				{busy && <div style={{ marginTop: 6, fontSize: 12, color: 'var(--ink-soft)' }}>{busy}</div>}
 			</div>
