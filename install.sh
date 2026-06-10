@@ -81,7 +81,7 @@ else
   cp "$unpacked" "${dest}/mori-canvas-server"
   chmod +x "${dest}/mori-canvas-server"
   readme="$(dirname "$unpacked")/README.txt"
-  [ -f "$readme" ] && cp "$readme" "${dest}/README.txt"
+  if [ -f "$readme" ]; then cp "$readme" "${dest}/README.txt"; fi
 fi
 
 # --- 3) symlink ~/.local/bin/mori-canvas-server(冪等)------------------------
