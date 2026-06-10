@@ -24,7 +24,34 @@ pub struct Room {
     pub online: std::sync::atomic::AtomicUsize,
     /// 房內最後活動時間(epoch 秒):doc 有寫入或有人連線就更新,TTL 清理用
     pub last_activity: Arc<std::sync::atomic::AtomicU64>,
+    /// 鎖板:true 時只有房主(帶正確 ownerKey 的連線)的寫入會落地
+    pub locked: std::sync::atomic::AtomicBool,
+    /// 房主鑰匙:建房的第一個 client claim;存 server 端 sidecar,不進共享 doc(否則人人看得到)
+    pub owner_key: std::sync::Mutex<Option<String>>,
     _sub: yrs::Subscription,
+}
+
+impl Room {
+    /// 這條連線的寫入是否落地:唯讀連結一律否;鎖板時只認房主鑰匙。
+    pub fn can_write(&self, conn_key: Option<&str>, readonly: bool) -> bool {
+        if readonly {
+            return false;
+        }
+        if !self.locked.load(std::sync::atomic::Ordering::Relaxed) {
+            return true;
+        }
+        match (conn_key, self.owner_key.lock().ok().and_then(|g| g.clone())) {
+            (Some(k), Some(o)) => k == o,
+            _ => false,
+        }
+    }
+}
+
+/// y-protocols 訊息分類:Sync(type 0)的 SyncStep2(1)/Update(2)會改動文件;
+/// SyncStep1(0,讀取請求)與 Awareness(type 1,游標/在線)不會。
+/// type 與 subtype 都是小值 varint = 單一 byte,直接看前兩個 byte 即可。
+pub fn is_doc_write(msg: &[u8]) -> bool {
+    msg.first() == Some(&0) && matches!(msg.get(1), Some(1) | Some(2))
 }
 pub type Rooms = Arc<RwLock<HashMap<String, Arc<Room>>>>;
 
@@ -166,15 +193,41 @@ pub async fn get_or_create_room(rooms: &Rooms, name: &str) -> Result<Arc<Room>, 
         .expect("observe_update_v1");
     let awareness: AwarenessRef = Arc::new(Awareness::new(doc));
     let bcast = Arc::new(BroadcastGroup::new(awareness.clone(), 32).await);
+    // 房主/鎖板狀態從 sidecar 載回(server 端持有,不進共享 doc)
+    let owner = load_owner_state(name);
     let room = Arc::new(Room {
         awareness,
         bcast,
         online: std::sync::atomic::AtomicUsize::new(0),
         last_activity,
+        locked: std::sync::atomic::AtomicBool::new(owner.as_ref().map(|o| o.locked).unwrap_or(false)),
+        owner_key: std::sync::Mutex::new(owner.and_then(|o| o.owner_key)),
         _sub: sub,
     });
     w.insert(name.to_string(), room.clone());
     Ok(room)
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Default)]
+pub struct OwnerState {
+    pub owner_key: Option<String>,
+    pub locked: bool,
+}
+fn owner_file(name: &str) -> PathBuf {
+    room_file(name).with_extension("own.json")
+}
+fn load_owner_state(name: &str) -> Option<OwnerState> {
+    std::fs::read_to_string(owner_file(name))
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+}
+pub fn save_owner_state(name: &str, room: &Room) {
+    let st = OwnerState {
+        owner_key: room.owner_key.lock().ok().and_then(|g| g.clone()),
+        locked: room.locked.load(std::sync::atomic::Ordering::Relaxed),
+    };
+    let _ = std::fs::create_dir_all(data_dir());
+    let _ = std::fs::write(owner_file(name), serde_json::to_string(&st).unwrap_or_default());
 }
 
 /// 背景 TTL 清理:每 30 分鐘掃一次。ROOM_TTL_HOURS=0(預設)完全不啟動。
@@ -275,7 +328,7 @@ impl Drop for OnlineGuard {
     }
 }
 
-pub async fn peer(ws: WebSocket, room: Arc<Room>) {
+pub async fn peer(ws: WebSocket, room: Arc<Room>, conn_key: Option<String>, readonly: bool) {
     room.online
         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     room.last_activity
@@ -284,6 +337,16 @@ pub async fn peer(ws: WebSocket, room: Arc<Room>) {
     let (sink, stream) = ws.split();
     let sink = Arc::new(Mutex::new(WarpSink::from(sink)));
     let stream = WarpStream::from(stream);
+    // server-side enforce:沒有寫入權的連線,文件寫入訊息在這裡被丟棄 —
+    // 不是 UI 隱藏;游標/在線(awareness)與讀取(SyncStep1)照常通過。
+    let perm_room = room.clone();
+    let stream = stream.filter(move |item| {
+        let pass = match item {
+            Ok(bytes) => !is_doc_write(bytes) || perm_room.can_write(conn_key.as_deref(), readonly),
+            Err(_) => true,
+        };
+        futures_util::future::ready(pass)
+    });
     let sub = room.bcast.subscribe(sink, stream);
     let _ = sub.completed().await;
 }
@@ -291,6 +354,18 @@ pub async fn peer(ws: WebSocket, room: Arc<Room>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn doc_write_classification() {
+        // Sync(0) + SyncStep1(0) = 讀取請求,放行
+        assert!(!is_doc_write(&[0, 0, 1, 2, 3]));
+        // Sync(0) + SyncStep2(1) / Update(2) = 文件寫入,要被權限管
+        assert!(is_doc_write(&[0, 1, 9]));
+        assert!(is_doc_write(&[0, 2, 9]));
+        // Awareness(1) = 游標/在線,放行
+        assert!(!is_doc_write(&[1, 5, 5]));
+        assert!(!is_doc_write(&[]));
+    }
 
     #[test]
     fn room_expiry_respects_ttl_and_zero_means_forever() {

@@ -813,22 +813,30 @@ pub async fn serve(port: u16) {
 
     // --- websocket sync (any path; strips optional sync/ prefix) ---
     let rooms_ws = rooms.clone();
-    let ws = warp::path::tail().and(warp::ws()).and_then(
-        move |tail: warp::path::Tail, ws: warp::ws::Ws| {
-            let rooms = rooms_ws.clone();
-            async move {
-                let mut name = tail.as_str().to_string();
-                if let Some(r) = name.strip_prefix("sync/") {
-                    name = r.to_string();
+    let ws = warp::path::tail()
+        .and(warp::query::<HashMap<String, String>>())
+        .and(warp::ws())
+        .and_then(
+            move |tail: warp::path::Tail, q: HashMap<String, String>, ws: warp::ws::Ws| {
+                let rooms = rooms_ws.clone();
+                async move {
+                    let mut name = tail.as_str().to_string();
+                    if let Some(r) = name.strip_prefix("sync/") {
+                        name = r.to_string();
+                    }
+                    let name = percent_encoding::percent_decode_str(&name)
+                        .decode_utf8_lossy()
+                        .to_string();
+                    let room = open_room(&rooms, &name).await?;
+                    // ?view=1 = 唯讀連結;?key= 房主鑰匙(鎖板時憑它寫入)
+                    let readonly = q.get("view").map(|v| v == "1").unwrap_or(false);
+                    let conn_key = q.get("key").filter(|k| !k.is_empty()).cloned();
+                    Ok::<_, warp::Rejection>(
+                        ws.on_upgrade(move |socket| sync::peer(socket, room, conn_key, readonly)),
+                    )
                 }
-                let name = percent_encoding::percent_decode_str(&name)
-                    .decode_utf8_lossy()
-                    .to_string();
-                let room = open_room(&rooms, &name).await?;
-                Ok::<_, warp::Rejection>(ws.on_upgrade(move |socket| sync::peer(socket, room)))
-            }
-        },
-    );
+            },
+        );
 
     let health = warp::get()
         .and(warp::path!("api" / "health"))
@@ -908,8 +916,60 @@ pub async fn serve(port: u16) {
     let meta_get = warp::get().and(warp::path!("api" / "rooms" / String / "meta")).and(with(r_meta_g)).and_then(|name: String, rooms: sync::Rooms| async move {
         let room = open_room(&rooms, &name).await?;
         let (typ, topic) = store::read_meta(&room);
-        Ok::<_, warp::Rejection>(warp::reply::json(&json!({ "ok": true, "type": typ, "topic": topic, "types": board_types::types_list() })))
+        let locked = room.locked.load(std::sync::atomic::Ordering::Relaxed);
+        let has_owner = room.owner_key.lock().ok().map(|g| g.is_some()).unwrap_or(false);
+        Ok::<_, warp::Rejection>(warp::reply::json(&json!({ "ok": true, "type": typ, "topic": topic, "types": board_types::types_list(), "locked": locked, "hasOwner": has_owner })))
     });
+
+    // POST /api/rooms/:room/claim — 建房的第一個 client 領房主鑰匙(已有房主就只回你是不是)
+    let r_claim = rooms.clone();
+    let claim = warp::post()
+        .and(warp::path!("api" / "rooms" / String / "claim"))
+        .and(warp::body::json())
+        .and(with(r_claim))
+        .and_then(|name: String, body: Value, rooms: sync::Rooms| async move {
+            let key: String = body.get("key").and_then(|v| v.as_str()).unwrap_or("").chars().take(64).collect();
+            if key.is_empty() || name == sync::DEMO_ROOM {
+                return Ok::<_, warp::Rejection>(warp::reply::json(&json!({ "ok": false, "error": "無法認領這個房間" })));
+            }
+            let room = open_room(&rooms, &name).await?;
+            let owner = {
+                let mut g = room.owner_key.lock().unwrap();
+                if g.is_none() {
+                    *g = Some(key.clone());
+                }
+                g.clone()
+            };
+            sync::save_owner_state(&name, &room);
+            Ok(warp::reply::json(&json!({ "ok": true, "owner": owner.as_deref() == Some(key.as_str()) })))
+        });
+
+    // POST /api/rooms/:room/lock — 房主鎖板/解鎖;鎖板後其他連線的寫入在 ws 層被丟棄
+    let r_lock = rooms.clone();
+    let lock_ep = warp::post()
+        .and(warp::path!("api" / "rooms" / String / "lock"))
+        .and(warp::body::json())
+        .and(with(r_lock))
+        .and_then(|name: String, body: Value, rooms: sync::Rooms| async move {
+            let key = body.get("key").and_then(|v| v.as_str()).unwrap_or("");
+            let want = body.get("locked").and_then(|v| v.as_bool()).unwrap_or(true);
+            let room = open_room(&rooms, &name).await?;
+            let is_owner = room
+                .owner_key
+                .lock()
+                .ok()
+                .and_then(|g| g.clone())
+                .map(|o| o == key)
+                .unwrap_or(false);
+            if !is_owner {
+                return Ok::<_, warp::Rejection>(warp::reply::json(
+                    &json!({ "ok": false, "error": "只有建房的人(房主)能鎖定/解鎖這塊板" }),
+                ));
+            }
+            room.locked.store(want, std::sync::atomic::Ordering::Relaxed);
+            sync::save_owner_state(&name, &room);
+            Ok(warp::reply::json(&json!({ "ok": true, "locked": want })))
+        });
     let r_meta_p = rooms.clone();
     let meta_post = warp::post()
         .and(warp::path!("api" / "rooms" / String / "meta"))
@@ -1358,6 +1418,8 @@ pub async fn serve(port: u16) {
         .or(end)
         .or(meta_get)
         .or(meta_post)
+        .or(claim)
+        .or(lock_ep)
         .or(frames_get)
         .or(frames_post)
         .or(export)
