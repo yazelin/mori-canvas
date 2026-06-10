@@ -12,6 +12,11 @@ services:
       # REQUIRED — your Groq API key (set the value in the Render dashboard, not in git)
       - key: GROQ_API_KEY
         sync: false
+      # REQUIRED — locks host-level settings (whisperUrl / mode / local-only / host Groq key)
+      # and "end room"; changing them needs a matching X-Admin-Token header. Use a long
+      # random string; set the value in the Render dashboard, not in git.
+      - key: ADMIN_TOKEN
+        sync: false
       # demo guard: max AI/STT requests PER IP per minute (each visitor has their own quota;
       # only people sharing one public IP/wifi share it). Tune anytime in the dashboard.
       # The real money-guard is a spending cap on your Groq account.

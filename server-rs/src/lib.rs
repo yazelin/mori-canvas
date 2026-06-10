@@ -184,6 +184,85 @@ static SETTINGS: Lazy<Mutex<Settings>> = Lazy::new(|| {
     })
 });
 
+/// 部署層管理 token(ADMIN_TOKEN env):設定後 POST /api/settings 與
+/// POST /api/rooms/:room/end 需帶相符的 X-Admin-Token header,否則 401。
+/// 空白字串視同未設定。
+static ADMIN_TOKEN: Lazy<Option<String>> = Lazy::new(|| {
+    std::env::var("ADMIN_TOKEN")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+});
+/// 連線來源是否 loopback(127.0.0.1 / ::1 / IPv4-mapped ::ffff:127.x)。
+/// 注意:Render 等有反向代理的部署 remote 是 proxy IP、永遠不是 loopback(訪客自動被鎖);
+/// 反之「同一台主機上的 nginx 反代」會讓所有訪客看起來都是 loopback ——
+/// 公開部署一律請設 ADMIN_TOKEN,別只靠這個判斷。
+fn is_loopback_addr(addr: Option<std::net::SocketAddr>) -> bool {
+    match addr.map(|a| a.ip()) {
+        Some(std::net::IpAddr::V4(ip)) => ip.is_loopback(),
+        Some(std::net::IpAddr::V6(ip)) => {
+            ip.is_loopback()
+                || ip
+                    .to_ipv4_mapped()
+                    .map(|v4| v4.is_loopback())
+                    .unwrap_or(false)
+        }
+        None => false,
+    }
+}
+/// 設定/管理端點的鑑權等級(純函數供測試)。
+#[derive(Debug, PartialEq, Clone, Copy)]
+enum SettingsAccess {
+    /// 全部欄位可改:帶對 token 的管理者,或未設 token 的單機 loopback
+    Full,
+    /// 僅個人偏好(spacing / autoTidy)可改,主機級欄位拒改
+    PersonalOnly,
+    /// 整個請求拒絕(HTTP 401)
+    Denied,
+}
+impl SettingsAccess {
+    /// 主機級欄位(whisperUrl / mode / sttSource / localOnly / groqApiKey)可否修改
+    fn allows_host_fields(self) -> bool {
+        self == SettingsAccess::Full
+    }
+    /// 個人偏好欄位(spacing / autoTidy)可否修改
+    fn allows_personal_fields(self) -> bool {
+        self != SettingsAccess::Denied
+    }
+}
+/// 鑑權決策:
+/// - 設了 ADMIN_TOKEN:X-Admin-Token 相符 => 全開;不符 / 沒帶 => 整個請求 401(loopback 也一樣)。
+/// - 未設 token(單機自用):loopback => 全開(維持現狀);非 loopback => 只能改個人偏好。
+fn settings_access(
+    admin_token: Option<&str>,
+    header_token: Option<&str>,
+    is_loopback: bool,
+) -> SettingsAccess {
+    match admin_token {
+        Some(t) => {
+            if header_token == Some(t) {
+                SettingsAccess::Full
+            } else {
+                SettingsAccess::Denied
+            }
+        }
+        None if is_loopback => SettingsAccess::Full,
+        None => SettingsAccess::PersonalOnly,
+    }
+}
+/// 401 回應:設了 ADMIN_TOKEN 的部署,token 不對就整個請求拒絕
+fn admin_locked_reply() -> warp::reply::Response {
+    use warp::Reply;
+    let mut res = warp::reply::json(&json!({
+        "ok": false,
+        "error": "此部署已鎖定主機設定(需要正確的 X-Admin-Token)",
+        "adminLocked": true,
+    }))
+    .into_response();
+    *res.status_mut() = warp::http::StatusCode::UNAUTHORIZED;
+    res
+}
+
 // ---- demo guards: per-IP rate limit + sponsor banner (env-driven, off unless set) ----
 fn demo_rate_per_min() -> Option<u32> {
     std::env::var("DEMO_RATE_PER_MIN")
@@ -799,16 +878,30 @@ pub async fn serve(port: u16) {
             Ok::<_, warp::Rejection>(warp::reply::json(&json!({ "ok": true })))
         });
 
-    // POST /api/rooms/:room/end
+    // POST /api/rooms/:room/end —— 設了 ADMIN_TOKEN 的部署需相符的 X-Admin-Token;
+    // 未設 token 維持現狀(單機/區網自用,任何人可結束房間)
     let r_end = rooms.clone();
     let end = warp::post()
         .and(warp::path!("api" / "rooms" / String / "end"))
+        .and(warp::header::optional::<String>("x-admin-token"))
+        .and(warp::addr::remote())
         .and(with(r_end))
-        .and_then(|name: String, rooms: sync::Rooms| async move {
-            let room = open_room(&rooms, &name).await?;
-            store::clear_room(&room);
-            Ok::<_, warp::Rejection>(warp::reply::json(&json!({ "ok": true })))
-        });
+        .and_then(
+            |name: String,
+             token: Option<String>,
+             addr: Option<std::net::SocketAddr>,
+             rooms: sync::Rooms| async move {
+                use warp::Reply;
+                let access =
+                    settings_access(ADMIN_TOKEN.as_deref(), token.as_deref(), is_loopback_addr(addr));
+                if access == SettingsAccess::Denied {
+                    return Ok::<_, warp::Rejection>(admin_locked_reply());
+                }
+                let room = open_room(&rooms, &name).await?;
+                store::clear_room(&room);
+                Ok(warp::reply::json(&json!({ "ok": true })).into_response())
+            },
+        );
 
     // GET/POST /api/rooms/:room/meta
     let r_meta_g = rooms.clone();
@@ -896,10 +989,12 @@ pub async fn serve(port: u16) {
             },
         );
 
-    // GET/POST /api/settings
-    let settings_get = warp::get().and(warp::path!("api" / "settings")).and_then(|| async move {
+    // GET/POST /api/settings —— adminLocked = 設了 ADMIN_TOKEN 或來源非 loopback,
+    // 表示「不帶 token 的話主機級欄位被鎖」(讓設定頁能提示)
+    let settings_get = warp::get().and(warp::path!("api" / "settings")).and(warp::addr::remote()).and_then(|addr: Option<std::net::SocketAddr>| async move {
         let s = SETTINGS.lock().await.clone();
-        let mut o = json!({ "ok": true, "spacing": s.spacing, "autoTidy": s.auto_tidy, "mode": s.mode, "sttSource": s.stt_source, "localOnly": s.local_only, "lockedLocalOnly": *LOCKED_LOCAL_ONLY, "whisperUrl": s.whisper_url, "groqKey": llm::groq_key().is_some() });
+        let admin_locked = ADMIN_TOKEN.is_some() || !is_loopback_addr(addr);
+        let mut o = json!({ "ok": true, "spacing": s.spacing, "autoTidy": s.auto_tidy, "mode": s.mode, "sttSource": s.stt_source, "localOnly": s.local_only, "lockedLocalOnly": *LOCKED_LOCAL_ONLY, "adminLocked": admin_locked, "whisperUrl": s.whisper_url, "groqKey": llm::groq_key().is_some() });
         for src in [llm::config_info(), stt::stt_capabilities(), sponsor_config()] {
             if let (Value::Object(dst), Value::Object(m)) = (&mut o, src) {
                 for (k, v) in m {
@@ -909,44 +1004,77 @@ pub async fn serve(port: u16) {
         }
         Ok::<_, warp::Rejection>(warp::reply::json(&o))
     });
-    let settings_post = warp::post().and(warp::path!("api" / "settings")).and(warp::body::json()).and_then(|body: Value| async move {
+    let settings_post = warp::post().and(warp::path!("api" / "settings")).and(warp::header::optional::<String>("x-admin-token")).and(warp::addr::remote()).and(warp::body::json()).and_then(|token: Option<String>, addr: Option<std::net::SocketAddr>, body: Value| async move {
+        use warp::Reply;
+        let access = settings_access(ADMIN_TOKEN.as_deref(), token.as_deref(), is_loopback_addr(addr));
+        // 設了 ADMIN_TOKEN 而 token 不對:整個請求 401(個人偏好也不放行)
+        if !access.allows_personal_fields() {
+            return Ok::<_, warp::Rejection>(admin_locked_reply());
+        }
+        let host_ok = access.allows_host_fields();
+        let mut host_rejected = false; // 有人試圖改主機級欄位但被擋
         let mut s = SETTINGS.lock().await;
+        // 個人偏好欄位:spacing / autoTidy(公開部署的訪客也可改)
         if let Some(v) = body.get("spacing").and_then(|v| v.as_f64()) {
             s.spacing = v.clamp(0.6, 2.0);
         }
         if let Some(v) = body.get("autoTidy").and_then(|v| v.as_bool()) {
             s.auto_tidy = v;
         }
+        // 以下皆為主機級欄位:未設 token 時僅 loopback 來源可改
         if let Some(v) = body.get("mode").and_then(|v| v.as_str()) {
-            if v == "mori" || v == "custom" {
+            if !host_ok {
+                host_rejected = true;
+            } else if v == "mori" || v == "custom" {
                 s.mode = v.into();
             }
         }
         if let Some(v) = body.get("sttSource").and_then(|v| v.as_str()) {
-            if v == "cloud" || v == "local" {
+            if !host_ok {
+                host_rejected = true;
+            } else if v == "cloud" || v == "local" {
                 s.stt_source = v.into();
             }
         }
         // 鎖定部署(LLM_LOCAL_ONLY)不允許關閉本機模式 —— 其他欄位照常生效
-        let (lo, lo_err) = apply_local_only_change(
-            *LOCKED_LOCAL_ONLY,
-            s.local_only,
-            body.get("localOnly").and_then(|v| v.as_bool()),
-        );
-        s.local_only = lo;
+        let mut lo_err = None;
+        if body.get("localOnly").and_then(|v| v.as_bool()).is_some() && !host_ok {
+            host_rejected = true;
+        } else {
+            let (lo, e) = apply_local_only_change(
+                *LOCKED_LOCAL_ONLY,
+                s.local_only,
+                body.get("localOnly").and_then(|v| v.as_bool()),
+            );
+            s.local_only = lo;
+            lo_err = e;
+        }
         if let Some(v) = body.get("whisperUrl").and_then(|v| v.as_str()) {
-            s.whisper_url = v.chars().take(200).collect();
+            if !host_ok {
+                host_rejected = true;
+            } else {
+                s.whisper_url = v.chars().take(200).collect();
+            }
         }
-        // user can paste a Groq key in the UI (no env / ~/.mori needed) -> unlocks cloud STT + AI
+        // 設定頁貼的 Groq key 是 server 級全域 —— 只留給單機桌面版(loopback)或管理者;
+        // 公開部署的訪客請走 BYO header(key 只在自己瀏覽器,訪客之間不共用)
         if let Some(v) = body.get("groqApiKey").and_then(|v| v.as_str()) {
-            llm::set_runtime_groq_key(v);
+            if !host_ok {
+                host_rejected = true;
+            } else {
+                llm::set_runtime_groq_key(v);
+            }
         }
-        let mut o = json!({ "ok": true, "spacing": s.spacing, "autoTidy": s.auto_tidy, "mode": s.mode, "sttSource": s.stt_source, "localOnly": s.local_only, "lockedLocalOnly": *LOCKED_LOCAL_ONLY, "whisperUrl": s.whisper_url, "groqKey": llm::groq_key().is_some(), "moriEar": stt::stt_capabilities().get("moriEar").cloned().unwrap_or(json!(false)), "whisperServer": stt::stt_capabilities().get("whisperServer").cloned().unwrap_or(json!(false)) });
+        let mut o = json!({ "ok": true, "spacing": s.spacing, "autoTidy": s.auto_tidy, "mode": s.mode, "sttSource": s.stt_source, "localOnly": s.local_only, "lockedLocalOnly": *LOCKED_LOCAL_ONLY, "adminLocked": !host_ok, "whisperUrl": s.whisper_url, "groqKey": llm::groq_key().is_some(), "moriEar": stt::stt_capabilities().get("moriEar").cloned().unwrap_or(json!(false)), "whisperServer": stt::stt_capabilities().get("whisperServer").cloned().unwrap_or(json!(false)) });
         if let Some(e) = lo_err {
             o["ok"] = json!(false);
             o["error"] = json!(e);
         }
-        Ok::<_, warp::Rejection>(warp::reply::json(&o))
+        if host_rejected {
+            o["ok"] = json!(false);
+            o["error"] = json!("主機級設定已鎖定,僅本機(loopback)或管理者可修改");
+        }
+        Ok(warp::reply::json(&o).into_response())
     });
 
     // POST /api/agent/:room — the AI turn (intent classify -> command or content)
@@ -1245,6 +1373,7 @@ pub async fn serve(port: u16) {
             "x-llm-base",
             "x-llm-key",
             "x-llm-model",
+            "x-admin-token",
         ]);
     // serve the embedded client (single self-contained binary: client + sync + api on one port).
     // SPA fallback: unknown paths -> index.html.
@@ -1350,6 +1479,53 @@ mod tests {
             (true, None)
         );
         assert_eq!(apply_local_only_change(false, false, None), (false, None));
+    }
+
+    #[test]
+    fn settings_access_three_scenarios() {
+        use SettingsAccess::*;
+        // 設了 token:相符 => 全開(loopback 與否皆然)
+        assert_eq!(settings_access(Some("s3cret"), Some("s3cret"), false), Full);
+        assert_eq!(settings_access(Some("s3cret"), Some("s3cret"), true), Full);
+        // 設了 token:不符 / 沒帶 => 整個請求拒絕,連 loopback 也一樣
+        assert_eq!(settings_access(Some("s3cret"), Some("wrong"), true), Denied);
+        assert_eq!(settings_access(Some("s3cret"), None, true), Denied);
+        assert_eq!(settings_access(Some("s3cret"), None, false), Denied);
+        // 未設 token + loopback:維持現狀全開(單機自用)
+        assert_eq!(settings_access(None, None, true), Full);
+        // 未設 token + 非 loopback:只能改個人偏好;帶了沒用的 token 也一樣
+        assert_eq!(settings_access(None, None, false), PersonalOnly);
+        assert_eq!(settings_access(None, Some("whatever"), false), PersonalOnly);
+    }
+
+    #[test]
+    fn settings_access_field_classes() {
+        // 三情境 × 主機級/個人欄位
+        let admin = settings_access(Some("t"), Some("t"), false);
+        assert!(admin.allows_host_fields());
+        assert!(admin.allows_personal_fields());
+        let denied = settings_access(Some("t"), None, true);
+        assert!(!denied.allows_host_fields());
+        assert!(!denied.allows_personal_fields());
+        let local = settings_access(None, None, true);
+        assert!(local.allows_host_fields());
+        assert!(local.allows_personal_fields());
+        // 未設 token 的公開部署訪客:spacing/autoTidy 可改,whisperUrl/mode/key 等拒改
+        let visitor = settings_access(None, None, false);
+        assert!(!visitor.allows_host_fields());
+        assert!(visitor.allows_personal_fields());
+    }
+
+    #[test]
+    fn loopback_detection_covers_v4_v6_and_mapped() {
+        let p = |s: &str| Some(s.parse::<std::net::SocketAddr>().unwrap());
+        assert!(is_loopback_addr(p("127.0.0.1:9999")));
+        assert!(is_loopback_addr(p("[::1]:9999")));
+        assert!(is_loopback_addr(p("[::ffff:127.0.0.1]:9999")));
+        assert!(!is_loopback_addr(p("192.168.1.5:9999")));
+        assert!(!is_loopback_addr(p("[2001:db8::1]:9999")));
+        // 拿不到來源位址(理論上不會發生)一律當非 loopback,寧可鎖不可放
+        assert!(!is_loopback_addr(None));
     }
 
     #[test]

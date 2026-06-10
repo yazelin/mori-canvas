@@ -297,7 +297,7 @@ export default function App() {
 	const [menuOpen, setMenuOpen] = useState(false) // mobile top-bar overflow menu
 	const [installPrompt, setInstallPrompt] = useState<any>(null) // deferred PWA install prompt
 	const [iosInstallHint, setIosInstallHint] = useState(false)
-	const [settings, setSettings] = useState({ localOnly: false, groqKey: true, spacing: 1, autoTidy: true, mode: 'mori', sttSource: 'local', whisperUrl: '' })
+	const [settings, setSettings] = useState({ localOnly: false, groqKey: true, spacing: 1, autoTidy: true, mode: 'mori', sttSource: 'local', whisperUrl: '', adminLocked: false })
 	// bring your own AI: any OpenAI-compatible base + key + model -> visitor's own quota
 	const [byo, setByo] = useState(() => ({ base: localStorage.getItem('wb-llm-base') || '', key: localStorage.getItem('wb-llm-key') || '', model: localStorage.getItem('wb-llm-model') || '' }))
 	const saveByo = (patch: Partial<typeof byo>) =>
@@ -308,16 +308,25 @@ export default function App() {
 			localStorage.setItem('wb-llm-model', n.model)
 			return n
 		})
-	const byoHeaders = (): Record<string, string> =>
-		byo.base.trim() && byo.key.trim() && byo.model.trim() ? { 'X-LLM-Base': byo.base.trim(), 'X-LLM-Key': byo.key.trim(), 'X-LLM-Model': byo.model.trim() } : {}
+	// 設定頁貼的 Groq key(wb-groq-key)也走同一套 BYO header:key 只存這個瀏覽器、
+	// 逐次請求帶上,不進 server 全域 —— 訪客之間不共用、也蓋不掉彼此。三格 BYO 都填時以 BYO 為準。
+	const byoHeaders = (): Record<string, string> => {
+		if (byo.base.trim() && byo.key.trim() && byo.model.trim())
+			return { 'X-LLM-Base': byo.base.trim(), 'X-LLM-Key': byo.key.trim(), 'X-LLM-Model': byo.model.trim() }
+		const gk = (localStorage.getItem('wb-groq-key') || '').trim()
+		if (gk) return { 'X-LLM-Base': 'https://api.groq.com/openai/v1', 'X-LLM-Key': gk, 'X-LLM-Model': 'openai/gpt-oss-120b' }
+		return {}
+	}
 	const [sponsor, setSponsor] = useState<{ url?: string; label?: string; notice?: string }>({})
 	const [sponsorHidden, setSponsorHidden] = useState(false)
 	const [caps, setCaps] = useState({ moriEar: true, whisperServer: true, groqKey: true })
-	// a Groq key the user can paste in settings (machine with no env / ~/.mori key) — kept in
-	// this browser and re-sent on load so it survives a server restart. Powers cloud STT + AI.
+	// 設定頁貼的 Groq key:存這個瀏覽器(localStorage),AI 請求逐次以 BYO header 帶上(見 byoHeaders)。
+	// 僅在主機未鎖時才同步給 server(單機桌面版 loopback 場景:讓雲端 STT 也能用);
+	// 公開部署 server 會拒收,key 只在這個瀏覽器生效(供 AI 畫卡,語音辨識仍走站長的 STT 設定)。
 	const [groqKeyInput, setGroqKeyInput] = useState(() => localStorage.getItem('wb-groq-key') || '')
-	async function saveGroqKey(key: string) {
+	async function saveGroqKey(key: string, adminLocked = settings.adminLocked) {
 		localStorage.setItem('wb-groq-key', key)
+		if (adminLocked) return
 		const r = await fetch(`${SYNC_HTTP}/api/settings`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ groqApiKey: key }) })
 			.then((x) => x.json())
 			.catch(() => null)
@@ -531,16 +540,24 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 			.catch(() => setBusy('排列失敗'))
 	}
 	async function saveSettings(patch: Partial<typeof settings>) {
-		const r = await fetch(`${SYNC_HTTP}/api/settings`, {
+		const res = await fetch(`${SYNC_HTTP}/api/settings`, {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json', ...byoHeaders() },
 			body: JSON.stringify(patch),
-		})
-			.then((x) => x.json())
-			.catch(() => null)
+		}).catch(() => null)
+		// 設了 ADMIN_TOKEN 的部署:沒帶正確 X-Admin-Token 一律 401,主機設定改不動
+		if (res?.status === 401) {
+			setSettings((s) => ({ ...s, adminLocked: true }))
+			setBusy('此部署已鎖定主機設定')
+			return
+		}
+		const r = await res?.json().catch(() => null)
 		if (r?.ok) {
-			setSettings({ localOnly: r.localOnly, groqKey: r.groqKey, spacing: r.spacing, autoTidy: r.autoTidy, mode: r.mode, sttSource: r.sttSource, whisperUrl: r.whisperUrl || '' })
+			setSettings({ localOnly: r.localOnly, groqKey: r.groqKey, spacing: r.spacing, autoTidy: r.autoTidy, mode: r.mode, sttSource: r.sttSource, whisperUrl: r.whisperUrl || '', adminLocked: !!r.adminLocked })
 			setCaps({ moriEar: r.moriEar, whisperServer: r.whisperServer, groqKey: r.groqKey })
+		} else if (r?.error) {
+			// 例:非 loopback 訪客試圖改主機級欄位(whisperUrl / 模式等)被擋
+			setBusy(r.error)
 		}
 		if (patch.spacing !== undefined) tidy() // re-arrange so the new spacing shows immediately
 	}
@@ -785,14 +802,15 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 			.then((x) => x.json())
 			.then((r) => {
 				if (!r?.ok) return
-				setSettings({ localOnly: r.localOnly, groqKey: r.groqKey, spacing: r.spacing, autoTidy: r.autoTidy, mode: r.mode, sttSource: r.sttSource, whisperUrl: r.whisperUrl || '' })
+				setSettings({ localOnly: r.localOnly, groqKey: r.groqKey, spacing: r.spacing, autoTidy: r.autoTidy, mode: r.mode, sttSource: r.sttSource, whisperUrl: r.whisperUrl || '', adminLocked: !!r.adminLocked })
 				setCaps({ moriEar: r.moriEar, whisperServer: r.whisperServer, groqKey: r.groqKey })
 				setCfgInfo({ llmGroqModel: r.llmGroqModel, llmOllamaModel: r.llmOllamaModel, sttProvider: r.sttProvider, sttGroqModel: r.sttGroqModel, sttLocalModel: r.sttLocalModel })
 				setSponsor({ url: r.sponsorUrl || '', label: r.sponsorLabel || '贊助', notice: r.demoNotice || '' })
 				// server's runtime Groq key is lost on restart — if this browser stashed one and
-				// the server now reports none, push it back so cloud STT/AI stay unlocked.
+				// the server now reports none, push it back so cloud STT stays unlocked.
+				// 只在主機未鎖時補送(單機 loopback 場景);鎖定部署的 key 走 BYO header 就好
 				const stored = localStorage.getItem('wb-groq-key')
-				if (stored && !r.groqKey) saveGroqKey(stored)
+				if (stored && !r.groqKey && !r.adminLocked) saveGroqKey(stored, !!r.adminLocked)
 			})
 			.catch(() => {})
 	}, [])
@@ -2242,6 +2260,12 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 						<div style={{ fontWeight: 700, fontSize: 16 }}>設定</div>
 						<div style={{ fontSize: 12, color: 'var(--ink-soft)', margin: '4px 0 16px' }}>即時生效、不寫死。</div>
 
+						{settings.adminLocked && (
+							<div style={{ fontSize: 12, color: 'var(--accent)', background: 'var(--accent-soft)', border: '1px solid var(--accent)', borderRadius: 10, padding: '8px 10px', marginBottom: 14, lineHeight: 1.6 }}>
+								此部署已鎖定主機設定(處理方式 / 語音來源 / 本機模式等僅站長可改)。「用你自己的 AI」與下方貼 Groq key 不受影響 —— key 只存你瀏覽器、走你自己的額度。
+							</div>
+						)}
+
 						{(() => {
 							const ON = { background: 'var(--accent-soft)', borderColor: 'var(--accent)', color: 'var(--accent)' }
 							return (
@@ -2264,8 +2288,13 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 									{settings.mode === 'custom' && (
 										<div style={{ border: '1px solid var(--line)', borderRadius: 12, padding: 12, marginBottom: 18 }}>
 											<div style={{ marginBottom: 12 }}>
-												<div style={{ fontWeight: 600, fontSize: 13, marginBottom: 4 }}>Groq API Key {caps.groqKey ? '✓ 已啟用' : '（雲端 Groq STT / AI 需要）'}</div>
-												<div className="muted" style={{ fontSize: 11, marginBottom: 6 }}>沒裝 mori-ear、環境也沒設 key 時，貼上你的 Groq key（console.groq.com/keys）就能用雲端語音與 AI。只存在你瀏覽器，不會顯示給別人。</div>
+												<div style={{ fontWeight: 600, fontSize: 13, marginBottom: 4 }}>Groq API Key {caps.groqKey ? '✓ 已啟用' : groqKeyInput.trim() ? '✓ 已啟用(此瀏覽器)' : '（雲端 AI 需要）'}</div>
+												<div className="muted" style={{ fontSize: 11, marginBottom: 6, lineHeight: 1.6 }}>
+													貼上你的 Groq key（console.groq.com/keys）:只存在你瀏覽器,AI 畫卡/摘要逐次請求帶上、走你自己的額度,訪客之間不共用。
+													{settings.adminLocked
+														? '注意:語音辨識(STT)仍走站長的 STT 設定,你的 key 不會用於語音辨識。'
+														: '單機自用時 key 會同步給本機 server,雲端語音辨識也能用。'}
+												</div>
 												<input type="password" value={groqKeyInput} placeholder="gsk_..." onChange={(e) => setGroqKeyInput(e.target.value)} onBlur={() => saveGroqKey(groqKeyInput.trim())} style={{ width: '100%', fontSize: 12 }} />
 											</div>
 											<div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>語音轉文字(Whisper)</div>
