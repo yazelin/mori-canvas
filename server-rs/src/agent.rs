@@ -537,7 +537,8 @@ pub async fn plan_agent(
     let messages = vec![
         Msg {
             role: "system",
-            content: crate::prompts::prompt("board-agent"),
+            // lang=en 時在 system 尾端附加英文輸出指令(prompts/*.md 本體不動)
+            content: crate::llm::with_output_lang(crate::prompts::prompt("board-agent"), llm.lang),
         },
         Msg {
             role: "user",
@@ -556,7 +557,7 @@ pub async fn plan_card_edit(
     local_only: bool,
     llm: &LlmOpts,
 ) -> Result<CardEdit, String> {
-    let sys = crate::prompts::prompt("card-edit");
+    let sys = crate::llm::with_output_lang(crate::prompts::prompt("card-edit"), llm.lang);
     let mut meta = vec![format!("文字「{}」", text)];
     if let Some(o) = owner {
         meta.push(format!("負責人「{}」", o));

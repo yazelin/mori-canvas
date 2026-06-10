@@ -391,16 +391,21 @@ fn with<T: Clone + Send>(
     warp::any().map(move || t.clone())
 }
 
-// visitor's "bring your own AI" override, from request headers (set client-side)
+// visitor's "bring your own AI" override + output language, from request headers
+// (set client-side; X-Lang: zh-TW|en — absent header keeps the zh-TW default)
 fn llm_opts() -> impl Filter<Extract = (llm::LlmOpts,), Error = warp::Rejection> + Clone {
     warp::header::optional::<String>("x-llm-base")
         .and(warp::header::optional::<String>("x-llm-key"))
         .and(warp::header::optional::<String>("x-llm-model"))
+        .and(warp::header::optional::<String>("x-lang"))
         .map(
-            |base: Option<String>, key: Option<String>, model: Option<String>| llm::LlmOpts {
-                base,
-                key,
-                model,
+            |base: Option<String>, key: Option<String>, model: Option<String>, lang: Option<String>| {
+                llm::LlmOpts {
+                    base,
+                    key,
+                    model,
+                    lang: llm::Lang::parse(lang.as_deref()),
+                }
             },
         )
 }
@@ -696,8 +701,13 @@ async fn summary_markdown(
         if topic.is_empty() { name } else { &topic },
         &frames,
     );
+    // 摘要文件的固定框字(標題/空板/失敗)跟著請求語言;板型區段標題仍為 zh(deterministic 轉換)
+    let (h_summary, msg_empty, msg_fail) = match llm.lang {
+        llm::Lang::En => ("Board summary", "(The board is empty)", "Summary failed"),
+        llm::Lang::ZhTw => ("白板摘要", "(白板還沒有內容)", "摘要失敗"),
+    };
     if shapes.is_empty() {
-        return format!("# 白板摘要:{}\n\n(白板還沒有內容)\n", title);
+        return format!("# {}:{}\n\n{}\n", h_summary, title, msg_empty);
     }
     let (_title, board) = summary_board_input_from_parts(
         &shapes,
@@ -706,12 +716,12 @@ async fn summary_markdown(
         &mtype,
         if topic.is_empty() { name } else { &topic },
     );
-    let sys = prompts::prompt("summary");
+    let sys = llm::with_output_lang(prompts::prompt("summary"), llm.lang);
     match llm::chat(
         &[
             llm::Msg {
                 role: "system",
-                content: sys.into(),
+                content: sys,
             },
             llm::Msg {
                 role: "user",
@@ -724,8 +734,8 @@ async fn summary_markdown(
     )
     .await
     {
-        Ok((t, _)) => format!("# 白板摘要:{}\n\n{}\n", title, strip_think(&t)),
-        Err(e) => format!("摘要失敗:{}", e),
+        Ok((t, _)) => format!("# {}:{}\n\n{}\n", h_summary, title, strip_think(&t)),
+        Err(e) => format!("{}:{}", msg_fail, e),
     }
 }
 
@@ -1030,14 +1040,19 @@ pub async fn serve(port: u16) {
             ))
         });
 
-    // GET /api/summary/:room — one-page meeting note via the LLM
+    // GET /api/summary/:room — one-page meeting note via the LLM。
+    // ?lang= 後備:這支會被 window.open 直接打開(帶不了 X-Lang header)
     let r_summary = rooms.clone();
     let summary = warp::get()
         .and(warp::path!("api" / "summary" / String))
+        .and(warp::query::<HashMap<String, String>>())
         .and(with(r_summary))
         .and(llm_opts())
         .and_then(
-            |name: String, rooms: sync::Rooms, llm: llm::LlmOpts| async move {
+            |name: String, q: HashMap<String, String>, rooms: sync::Rooms, mut llm: llm::LlmOpts| async move {
+                if let Some(l) = q.get("lang") {
+                    llm.lang = llm::Lang::parse(Some(l));
+                }
                 let room = open_room(&rooms, &name).await?;
                 let lo = SETTINGS.lock().await.local_only;
                 let md = summary_markdown(&room, &name, lo, &llm).await;
@@ -1353,10 +1368,14 @@ pub async fn serve(port: u16) {
         .and(warp::body::json())
         .and(with(r_viz))
         .and(llm_opts())
-        .and_then(move |body: Value, rooms: sync::Rooms, llm: llm::LlmOpts| async move {
+        .and_then(move |body: Value, rooms: sync::Rooms, mut llm: llm::LlmOpts| async move {
             let transcript = body.get("transcript").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
             if transcript.is_empty() {
                 return Ok::<_, warp::Rejection>(warp::reply::json(&json!({ "ok": false, "error": "transcript required" })));
+            }
+            // headless JSON 呼叫端(AgentOS dispatch)用 body 帶 lang 也行,優先於 header
+            if let Some(l) = body.get("lang").and_then(|v| v.as_str()) {
+                llm.lang = llm::Lang::parse(Some(l));
             }
             let name = body
                 .get("room")
@@ -1436,6 +1455,7 @@ pub async fn serve(port: u16) {
             "x-llm-key",
             "x-llm-model",
             "x-admin-token",
+            "x-lang",
         ]);
     // serve the embedded client (single self-contained binary: client + sync + api on one port).
     // SPA fallback: unknown paths -> index.html.
