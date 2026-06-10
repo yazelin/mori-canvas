@@ -912,13 +912,13 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 		}
 		let stream: MediaStream
 		try {
-			stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+			stream = await navigator.mediaDevices.getUserMedia(MIC_CONSTRAINTS)
 		} catch (e) {
 			setBusy(micErrorMsg(e))
 			return
 		}
 		const chunks: BlobPart[] = []
-		const mr = new MediaRecorder(stream)
+		const mr = new MediaRecorder(stream, REC_OPTS)
 		mr.ondataavailable = (ev) => ev.data.size && chunks.push(ev.data)
 		mr.onstop = async () => {
 			stream.getTracks().forEach((t) => t.stop())
@@ -966,6 +966,34 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 	const pauseTimer = useRef<any>(null)
 	const sendQueue = useRef<{ id: number; blob: Blob }[]>([])
 	const meterRef = useRef(0) // 即時 RMS,給 VolBars 輪詢(避免 120ms setState 重繪整個 App)
+	// 手機錄音韌性:螢幕喚醒鎖(熄屏會殺錄音)+ 系統收回麥克風時的恢復提示
+	const wakeLockRef = useRef<any>(null)
+	const [recInterrupted, setRecInterrupted] = useState(false)
+	async function acquireWakeLock() {
+		try {
+			wakeLockRef.current = await (navigator as any).wakeLock?.request('screen')
+		} catch {} // 不支援或被拒就算了,錄音照跑
+	}
+	function releaseWakeLock() {
+		try {
+			wakeLockRef.current?.release()
+		} catch {}
+		wakeLockRef.current = null
+	}
+	useEffect(() => {
+		if (!meeting) return
+		// 切去別的 app 再回來:系統會釋放 wake lock,要重新拿
+		const onVis = () => {
+			if (document.visibilityState === 'visible' && meeting) void acquireWakeLock()
+		}
+		document.addEventListener('visibilitychange', onVis)
+		return () => document.removeEventListener('visibilitychange', onVis)
+	}, [meeting])
+	// 語音上傳只需要單聲道人聲:壓低位元率(預設 ~128kbps → 48kbps),行動網路上傳快、流量省
+	const REC_OPTS: MediaRecorderOptions = { audioBitsPerSecond: 48000 }
+	const MIC_CONSTRAINTS: MediaStreamConstraints = {
+		audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
+	}
 
 	function micErrorMsg(e: any): string {
 		const n = e?.name || ''
@@ -1067,13 +1095,15 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 		}
 		let stream: MediaStream
 		try {
-			stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+			stream = await navigator.mediaDevices.getUserMedia(MIC_CONSTRAINTS)
 		} catch (e) {
 			setBusy(micErrorMsg(e))
 			return
 		}
 		setMeeting(true)
 		setSegCount(0)
+		setRecInterrupted(false)
+		void acquireWakeLock() // 錄音中不讓螢幕自動熄(熄屏 = 系統殺錄音)
 		setBusy('會議記錄中…講一段、停頓一下就會自動整理上板')
 
 		const ctx = new AudioContext()
@@ -1099,7 +1129,7 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 
 		const startSeg = () => {
 			chunks = []
-			mr = new MediaRecorder(stream)
+			mr = new MediaRecorder(stream, REC_OPTS)
 			mr.ondataavailable = (ev) => ev.data.size && chunks.push(ev.data)
 			mr.onstop = () => queueSegment(new Blob(chunks, { type: mr?.mimeType || 'audio/webm' }))
 			mr.start()
@@ -1116,6 +1146,15 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 		}
 		const iv = setInterval(() => {
 			if (!alive) return
+			// 手機切走/熄屏後系統可能 suspend AudioContext、停掉 MediaRecorder、甚至收回麥克風:
+			// 能自動救的就地救,救不了(track 死了)就亮「恢復」鈕
+			const track = stream.getAudioTracks()[0]
+			if (!track || track.readyState === 'ended') {
+				setRecInterrupted(true)
+				return
+			}
+			if (ctx.state === 'suspended') void ctx.resume().catch(() => {})
+			if (mr && mr.state === 'inactive') startSeg()
 			analyser.getByteTimeDomainData(buf)
 			let sum = 0
 			for (let i = 0; i < buf.length; i++) {
@@ -1150,6 +1189,8 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 				} catch {}
 				stream.getTracks().forEach((t) => t.stop())
 				ctx.close().catch(() => {})
+				releaseWakeLock()
+				setRecInterrupted(false)
 				setMeeting(false)
 				setBusy('會議記錄結束')
 			},
@@ -1175,13 +1216,13 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 		}
 		let stream: MediaStream
 		try {
-			stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+			stream = await navigator.mediaDevices.getUserMedia(MIC_CONSTRAINTS)
 		} catch (e) {
 			setBusy(micErrorMsg(e))
 			return
 		}
 		const chunks: BlobPart[] = []
-		const mr = new MediaRecorder(stream)
+		const mr = new MediaRecorder(stream, REC_OPTS)
 		mr.ondataavailable = (ev) => ev.data.size && chunks.push(ev.data)
 		mr.onstop = async () => {
 			stream.getTracks().forEach((t) => t.stop())
@@ -1872,6 +1913,7 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 				<>
 					<div className="glass float-in" style={{ position: 'fixed', top: 'calc(8px + env(safe-area-inset-top, 0px))', left: 'calc(8px + env(safe-area-inset-left, 0px))', right: 'calc(8px + env(safe-area-inset-right, 0px))', zIndex: 1000, display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', fontSize: 13 }}>
 						<span className="code" style={{ fontSize: 17, color: 'var(--accent)' }}>{room}</span>
+						{meeting && <span className="rec-dot live" title="會議記錄中" style={{ marginRight: 0 }} />}
 						<button className="btn-accent" style={{ padding: '5px 11px' }} data-tour="share" onClick={() => setShareOpen(true)}>分享</button>
 						<span style={{ flex: 1 }} />
 						<span className="muted" style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{statusZh(status)}·{shapes.length}</span>
@@ -1896,10 +1938,32 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 				<div className="glass float-in" style={bar}>
 					<span className="muted" style={{ fontSize: 12 }}>房號</span>
 					<span className="code" style={{ fontSize: 19, color: 'var(--accent)', marginRight: 2 }}>{room}</span>
+					{meeting && <span className="rec-dot live" title="會議記錄中" style={{ marginRight: 0 }} />}
 					<button title="分享這間會議室:QR、房號、邀請連結" className="btn-accent" data-tour="share" onClick={() => setShareOpen(true)}>分享 / QR</button>
 					<span className="muted" style={{ fontSize: 12 }} title={status === 'synced' ? '已即時連線' : statusZh(status)}>
 						{statusZh(status)} · {shapes.length} 張
 					</span>
+				</div>
+			)}
+
+			{/* 錄音被系統中斷(熄屏/切 app 後麥克風被收回)→ 醒目恢復鈕,一鍵重啟錄音 */}
+			{recInterrupted && (
+				<div
+					className="glass"
+					style={{ position: 'fixed', top: 58, left: 0, right: 0, marginInline: 'auto', width: 'fit-content', maxWidth: '92vw', zIndex: 1001, padding: '8px 16px', fontSize: 13, display: 'flex', gap: 10, alignItems: 'center', border: '1px solid var(--live)' }}
+				>
+					<span style={{ color: 'var(--live)', fontWeight: 600 }}>錄音被中斷(系統收回了麥克風)</span>
+					<button
+						className="btn-accent"
+						style={{ padding: '4px 14px', fontSize: 12.5 }}
+						onClick={() => {
+							setRecInterrupted(false)
+							stopMeeting()
+							void startMeeting()
+						}}
+					>
+						點此恢復錄音
+					</button>
 				</div>
 			)}
 
