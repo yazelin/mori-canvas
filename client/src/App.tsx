@@ -3,6 +3,7 @@ import { Stage, Layer, Group, Rect, Text, Arrow, Circle } from 'react-konva'
 import * as Y from 'yjs'
 import { WebsocketProvider } from 'y-websocket'
 import QRCode from 'qrcode'
+import { fitCardSize, BASE_FONT } from './fitCardSize'
 
 type Sticky = {
 	id: string
@@ -18,6 +19,7 @@ type Sticky = {
 	frameId?: string // 屬於哪張圖框;無 = 自由卡
 	note?: boolean // 備註卡:自動排列與 AI 都不動它
 	type?: string // yjs 物件種別(sticky)
+	fontSize?: number // 自動高度時可能縮的字級;無 = 預設 19
 }
 type Connector = { id: string; from: string; to: string }
 
@@ -1827,7 +1829,7 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 									width={s.w}
 									height={s.h}
 									padding={20}
-									fontSize={19}
+									fontSize={s.fontSize || BASE_FONT}
 									lineHeight={1.25}
 									fontFamily={CANVAS_FONT}
 									fontStyle="500"
@@ -1936,7 +1938,9 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 							value={editing.value}
 							onChange={(e) => setEditing({ id: editing.id, value: e.target.value })}
 							onBlur={() => {
-								patchShape(editing.id, { text: editing.value })
+								// 提交文字時依內容自動調卡高與字級(只影響手動輸入;AI 建卡文字短,走 server 的 200x200)
+								const { h, fontSize } = fitCardSize(editing.value, s.w)
+								patchShape(editing.id, { text: editing.value, h, fontSize })
 								setEditing(null)
 							}}
 							onKeyDown={(e) => {
