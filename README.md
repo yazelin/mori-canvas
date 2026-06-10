@@ -232,6 +232,12 @@ curl -X POST localhost:1334/api/visualize -H 'Content-Type: application/json' \
 
 ---
 
+## 社群範本
+
+範例庫(app 內「?」→ 範例庫)除了內建五個 persona 範例,也收社群投稿的範本(`client/public/templates/`)。每份範本都有一條**深連結**可以分享:`?room=<新房號>&board=<範本id>` —— 對方點開,新房間自動長出整張板(房間已有內容則略過,不會蓋掉);範例庫裡每份範本旁也有「複製分享連結」按鈕。想投自己的板,看 [templates/README.md](client/public/templates/README.md);回報問題與 PR 規範見 [CONTRIBUTING.md](CONTRIBUTING.md)。
+
+---
+
 ## 功能一覽
 
 - **兩段式 AI(清稿 → 畫卡)**:逐字稿先過 stage-1 清稿(規則層 + LLM,`prompts/transcript-cleanup.md` 改了即生效)再進畫卡 agent,贅字冗詞、斷錯句不會被抄進卡片;`/api/agent`、`/api/visualize` 可帶 `"cleanup": false` 跳過,`/api/voice` 回傳 `transcript`(清後)+ `rawTranscript`(原文)。
