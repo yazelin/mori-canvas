@@ -1671,7 +1671,7 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 			{filter && (
 				<div
 					className="glass float-in"
-					style={{ position: 'fixed', bottom: 40, left: '50%', transform: 'translateX(-50%)', zIndex: 1400, display: 'flex', gap: 8, alignItems: 'center', padding: '6px 12px', fontSize: 13 }}
+					style={{ position: 'fixed', bottom: 40, left: 0, right: 0, marginInline: 'auto', width: 'fit-content', zIndex: 1400, display: 'flex', gap: 8, alignItems: 'center', padding: '6px 12px', fontSize: 13 }}
 				>
 					<span>只看 {filter.type === 'tag' ? '#' + filter.value : filter.value}</span>
 					<button style={{ padding: '3px 9px' }} onClick={() => setFilter(null)}>
@@ -1925,8 +1925,10 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 					style={{
 						position: 'fixed',
 						bottom: mobile ? 92 : 74,
-						left: '50%',
-						transform: 'translateX(-50%)',
+						left: 0,
+						right: 0,
+						marginInline: 'auto',
+						width: 'fit-content',
 						zIndex: 1600,
 						maxWidth: '80vw',
 						padding: '8px 16px',
@@ -2146,11 +2148,15 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 }
 
 // these get className="glass" for the frosted look; consts hold position/layout only
+// 置中不能用 left:50% + translateX(-50%):float-in/modal-in 動畫的 transform 會把它蓋掉
+// (fill-mode both + to{transform:none}),動畫結束就歪掉。改用 inset+margin 置中。
 const bar: React.CSSProperties = {
 	position: 'fixed',
 	top: 14,
-	left: '50%',
-	transform: 'translateX(-50%)',
+	left: 0,
+	right: 0,
+	marginInline: 'auto',
+	width: 'fit-content',
 	zIndex: 1000,
 	display: 'flex',
 	flexWrap: 'wrap',
