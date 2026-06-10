@@ -1,0 +1,30 @@
+# systemd unit — mori-canvas-server 常駐(單一 Rust binary,內嵌前端 + API + 即時同步)。
+# 預設縮 loopback,前面擺 nginx 終結 TLS(見 nginx.conf.example);
+# 純內網不想擺 nginx 的話,在 env 檔把 BIND 改 0.0.0.0 即可。
+#
+# 安裝(先把下面三處 /home/USER 與 User=USER 換成實際使用者):
+#   sudo cp deploy/mori-canvas.service /etc/systemd/system/
+#   sudo cp deploy/mori-canvas.env.example /etc/mori-canvas.env    # 填 GROQ_API_KEY 等
+#   sudo systemctl daemon-reload && sudo systemctl enable --now mori-canvas
+# logs:  journalctl -u mori-canvas -f
+[Unit]
+Description=Mori Canvas server (embedded client + API + realtime sync)
+After=network.target
+
+[Service]
+Type=simple
+# 換成實際使用者(房間資料 .data/ 會以這個身分寫入 WorkingDirectory)
+User=USER
+# .data/(房間快照)與 certs/(自簽憑證,HTTPS=1 才用)都相對這個目錄;目錄要先建好
+WorkingDirectory=/home/USER/.local/share/mori-canvas
+# install.sh 裝好的位置;從源碼 build 則換成 /path/to/mori-canvas/server-rs/target/release/mori-canvas-server
+ExecStart=/home/USER/.local/bin/mori-canvas-server
+# GROQ_API_KEY / PORT / BIND / LLM_LOCAL_ONLY 等都放這檔(開頭的 - = 檔案不存在也照樣啟動)
+EnvironmentFile=-/etc/mori-canvas.env
+# 預設只聽 loopback(env 檔設 BIND 可覆蓋)
+Environment=BIND=127.0.0.1
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
