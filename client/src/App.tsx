@@ -498,6 +498,12 @@ export default function App() {
 		} catch {
 			summaryMd = '(摘要產生失敗)'
 		}
+		// embed a snapshot of the whole board (self-contained dataURL, capped at 1200px)
+		let boardImg = ''
+		try {
+			const url = await boardPng(false, 1200)
+			if (url) boardImg = `<section><img class="board" src="${url}" alt="白板全圖"></section>`
+		} catch {}
 		const tHtml = transcript.length
 			? transcript.map((e: any) => `<div class="t"><span class="m">${esc((e.t || '').slice(11, 16))} ${esc(e.by || '')}</span>${esc(e.text || '')}</div>`).join('')
 			: '<p class="muted">(這場沒有逐字記錄)</p>'
@@ -514,9 +520,11 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 .transcript{margin-top:8px}.t{font-size:13px;padding:5px 0;border-bottom:1px solid var(--line)}
 .t .m{color:var(--soft);font-size:11px;margin-right:8px;white-space:nowrap}
 .muted{color:var(--soft)}footer{margin-top:40px;color:var(--soft);font-size:12px;text-align:center}
+.board{display:block;width:100%;height:auto;border:1px solid var(--line);border-radius:12px;margin:18px 0 6px}
 @media print{body{background:#fff}.wrap{max-width:none}}
 </style></head><body><div class="wrap">
 <header><h1>白板紀錄</h1><div class="sub">房號 ${esc(room)}${boardTopic ? ' · ' + esc(boardTopic) : ''} · ${esc(date)}</div></header>
+${boardImg}
 <section>${mdToHtml(summaryMd)}</section>
 <section class="transcript"><h2>逐字記錄</h2>${tHtml}</section>
 <footer>由 Mori Canvas 共筆白板產生</footer>
@@ -582,6 +590,82 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 		a.href = uri
 		a.download = `whiteboard-${room}.png`
 		a.click()
+	}
+	// world-space bounding box of everything on the board (frames + cards)
+	function contentBBox(): { x: number; y: number; w: number; h: number } | null {
+		const rects = [
+			...frames.map((f: any) => ({ x: f.x, y: f.y, w: f.w, h: f.h })),
+			...shapes.map((s) => ({ x: s.x, y: s.y, w: s.w, h: s.h })),
+		]
+		if (!rects.length) return null
+		let minX = Infinity
+		let minY = Infinity
+		let maxX = -Infinity
+		let maxY = -Infinity
+		for (const r of rects) {
+			minX = Math.min(minX, r.x)
+			minY = Math.min(minY, r.y)
+			maxX = Math.max(maxX, r.x + r.w)
+			maxY = Math.max(maxY, r.y + r.h)
+		}
+		return { x: minX, y: minY, w: maxX - minX, h: maxY - minY }
+	}
+	// render the WHOLE board (content bbox + padding, not just the viewport) to a PNG
+	// dataURL. The stage transform is temporarily reset so toDataURL crops in world
+	// coords, then restored — the on-screen view never visibly moves.
+	// maxPx caps the output's larger edge (pixelRatio shrinks for huge boards).
+	async function boardPng(transparent: boolean, maxPx = 4096): Promise<string | null> {
+		const stage = stageRef.current
+		const bbox = contentBBox()
+		if (!stage || !bbox) return null
+		const PAD = 30
+		const w = bbox.w + PAD * 2
+		const h = bbox.h + PAD * 2
+		const pixelRatio = Math.min(2, maxPx / w, maxPx / h)
+		const prev = { x: stage.x(), y: stage.y(), scaleX: stage.scaleX(), scaleY: stage.scaleY() }
+		stage.position({ x: PAD - bbox.x, y: PAD - bbox.y })
+		stage.scale({ x: 1, y: 1 })
+		const dataUrl = stage.toDataURL({ x: 0, y: 0, width: w, height: h, pixelRatio })
+		stage.position({ x: prev.x, y: prev.y })
+		stage.scale({ x: prev.scaleX, y: prev.scaleY })
+		if (transparent) return dataUrl
+		// composite onto paper matching the CURRENT theme (Konva canvas itself is transparent)
+		const paper = getComputedStyle(document.documentElement).getPropertyValue('--paper').trim() || '#f1ece1'
+		return new Promise((resolve) => {
+			const img = new Image()
+			img.onload = () => {
+				const c = document.createElement('canvas')
+				c.width = img.width
+				c.height = img.height
+				const ctx = c.getContext('2d')!
+				ctx.fillStyle = paper
+				ctx.fillRect(0, 0, c.width, c.height)
+				ctx.drawImage(img, 0, 0)
+				resolve(c.toDataURL('image/png'))
+			}
+			img.onerror = () => resolve(dataUrl)
+			img.src = dataUrl
+		})
+	}
+	// copy the whole-board PNG to the clipboard (paste straight into chats / docs)
+	async function copyPngToClipboard() {
+		if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') {
+			setBusy('此瀏覽器不支援複製圖片,請改用「下載 PNG」')
+			return
+		}
+		setBusy('產生整板圖片中…')
+		try {
+			// pass a Promise<Blob> so Safari accepts the write inside the user gesture
+			const blobPromise = (async () => {
+				const url = await boardPng(pngTransparent)
+				if (!url) throw new Error('empty board')
+				return await (await fetch(url)).blob()
+			})()
+			await navigator.clipboard.write([new ClipboardItem({ 'image/png': blobPromise })])
+			setBusy('已複製整板圖片,直接貼上即可')
+		} catch {
+			setBusy(contentBBox() ? '複製失敗(瀏覽器拒絕),請改用「下載 PNG」' : '板上沒有內容,先加幾張卡再複製')
+		}
 	}
 	// the Konva stage canvas is transparent (the paper grid is CSS, not drawn).
 	// transparent=true exports as-is; otherwise composite onto a paper background.
@@ -666,26 +750,15 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 			}
 			inp.click()
 		}
-		function exportPng(transparent: boolean) {
-		const stage = stageRef.current
-		if (!stage) return
-		const dataUrl = stage.toDataURL({ pixelRatio: 2 })
-		if (transparent) {
-			downloadUri(dataUrl)
+		async function exportPng(transparent: boolean) {
+		setBusy('產生整板 PNG…')
+		const url = await boardPng(transparent)
+		if (!url) {
+			setBusy('板上沒有內容,先加幾張卡再匯出')
 			return
 		}
-		const img = new Image()
-		img.onload = () => {
-			const c = document.createElement('canvas')
-			c.width = img.width
-			c.height = img.height
-			const ctx = c.getContext('2d')!
-			ctx.fillStyle = '#f1ece1' // paper
-			ctx.fillRect(0, 0, c.width, c.height)
-			ctx.drawImage(img, 0, 0)
-			downloadUri(c.toDataURL('image/png'))
-		}
-		img.src = dataUrl
+		downloadUri(url)
+		setBusy('已下載整板 PNG')
 	}
 
 	useEffect(() => {
@@ -2424,8 +2497,8 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 							style={{ display: 'block', width: '100%', textAlign: 'left', marginBottom: 8, padding: '11px 12px' }}
 							onClick={() => { exportHtml(); setExportOpen(false) }}
 						>
-							<div style={{ fontWeight: 600, fontSize: 14 }}>白板紀錄 (HTML) · 含逐字稿</div>
-							<div style={{ fontSize: 12, color: 'var(--ink-soft)' }}>下載 .html —— 摘要 + 逐字稿,雙擊就能在瀏覽器看</div>
+							<div style={{ fontWeight: 600, fontSize: 14 }}>白板紀錄 (HTML) · 含板圖與逐字稿</div>
+							<div style={{ fontSize: 12, color: 'var(--ink-soft)' }}>下載 .html —— 整板快照圖 + 摘要 + 逐字稿,離線雙擊就能看</div>
 						</button>
 						<button
 							style={{ display: 'block', width: '100%', textAlign: 'left', marginBottom: 8, padding: '11px 12px' }}
@@ -2438,24 +2511,37 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 							<div style={{ fontSize: 12, color: 'var(--ink-soft)' }}>下載 .md —— 每張圖一個區段</div>
 						</button>
 						<div style={{ border: '1px solid var(--line)', borderRadius: 12, padding: '11px 12px', marginBottom: 12 }}>
-							<div style={{ fontWeight: 600, fontSize: 14 }}>白板圖片 (PNG)</div>
+							<div style={{ fontWeight: 600, fontSize: 14 }}>白板圖片 (PNG) · 整板</div>
+							<div style={{ fontSize: 12, color: 'var(--ink-soft)', marginTop: 2 }}>輸出完整板面(含畫面外的卡片),紙底顏色跟著目前主題</div>
 							<div style={{ display: 'flex', gap: 16, margin: '8px 0', fontSize: 13 }}>
 								<label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, cursor: 'pointer' }}>
-									<input type="radio" checked={!pngTransparent} onChange={() => setPngTransparent(false)} /> 紙底(白)
+									<input type="radio" checked={!pngTransparent} onChange={() => setPngTransparent(false)} /> 紙底(依主題)
 								</label>
 								<label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, cursor: 'pointer' }}>
 									<input type="radio" checked={pngTransparent} onChange={() => setPngTransparent(true)} /> 透明底
 								</label>
 							</div>
-							<button
-								className="btn-primary" style={{ width: '100%' }}
-								onClick={() => {
-									exportPng(pngTransparent)
-									setExportOpen(false)
-								}}
-							>
-								下載 PNG
-							</button>
+							<div style={{ display: 'flex', gap: 8 }}>
+								<button
+									className="btn-primary" style={{ flex: 1 }}
+									onClick={() => {
+										void exportPng(pngTransparent)
+										setExportOpen(false)
+									}}
+								>
+									下載 PNG
+								</button>
+								<button
+									style={{ flex: 1 }}
+									title="把整板 PNG 放進剪貼簿,到聊天軟體 / 文件直接貼上"
+									onClick={() => {
+										void copyPngToClipboard()
+										setExportOpen(false)
+									}}
+								>
+									複製到剪貼簿
+								</button>
+							</div>
 						</div>
 						<button style={{ width: '100%' }} onClick={() => setExportOpen(false)}>
 							關閉
