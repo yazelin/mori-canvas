@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { flushSync } from 'react-dom'
 import { Stage, Layer, Group, Rect, Text, Arrow, Circle } from 'react-konva'
 import * as Y from 'yjs'
 import { WebsocketProvider } from 'y-websocket'
@@ -153,6 +154,10 @@ function resolveRoom(): string {
 }
 
 const ACCENT = '#b4530a'
+// Konva perf: skip the "perfect draw" buffer-canvas pass on every node — none of our
+// shapes need it (it only matters for translucent fill+stroke overlap), and it costs
+// an extra offscreen draw per node per frame.
+const PERF = { perfectDrawEnabled: false } as const
 // lighten a #rrggbb toward white (for the soft top of the sticky gradient)
 function lighten(hex: string, amt = 0.09): string {
 	const m = /^#?([0-9a-f]{6})$/i.exec(hex)
@@ -293,6 +298,7 @@ export default function App() {
 	const [newFrameTitle, setNewFrameTitle] = useState('')
 	const [exportOpen, setExportOpen] = useState(false)
 	const [pngTransparent, setPngTransparent] = useState(false)
+	const [exporting, setExporting] = useState(false) // true while capturing the whole board (disables viewport culling)
 	const [settingsOpen, setSettingsOpen] = useState(false)
 	const [menuOpen, setMenuOpen] = useState(false) // mobile top-bar overflow menu
 	const [installPrompt, setInstallPrompt] = useState<any>(null) // deferred PWA install prompt
@@ -498,6 +504,12 @@ export default function App() {
 		} catch {
 			summaryMd = '(摘要產生失敗)'
 		}
+		// embed a snapshot of the whole board (self-contained dataURL, capped at 1200px)
+		let boardImg = ''
+		try {
+			const url = await boardPng(false, 1200)
+			if (url) boardImg = `<section><img class="board" src="${url}" alt="白板全圖"></section>`
+		} catch {}
 		const tHtml = transcript.length
 			? transcript.map((e: any) => `<div class="t"><span class="m">${esc((e.t || '').slice(11, 16))} ${esc(e.by || '')}</span>${esc(e.text || '')}</div>`).join('')
 			: '<p class="muted">(這場沒有逐字記錄)</p>'
@@ -514,9 +526,11 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 .transcript{margin-top:8px}.t{font-size:13px;padding:5px 0;border-bottom:1px solid var(--line)}
 .t .m{color:var(--soft);font-size:11px;margin-right:8px;white-space:nowrap}
 .muted{color:var(--soft)}footer{margin-top:40px;color:var(--soft);font-size:12px;text-align:center}
+.board{display:block;width:100%;height:auto;border:1px solid var(--line);border-radius:12px;margin:18px 0 6px}
 @media print{body{background:#fff}.wrap{max-width:none}}
 </style></head><body><div class="wrap">
 <header><h1>白板紀錄</h1><div class="sub">房號 ${esc(room)}${boardTopic ? ' · ' + esc(boardTopic) : ''} · ${esc(date)}</div></header>
+${boardImg}
 <section>${mdToHtml(summaryMd)}</section>
 <section class="transcript"><h2>逐字記錄</h2>${tHtml}</section>
 <footer>由 Mori Canvas 共筆白板產生</footer>
@@ -582,6 +596,84 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 		a.href = uri
 		a.download = `whiteboard-${room}.png`
 		a.click()
+	}
+	// world-space bounding box of everything on the board (frames + cards)
+	function contentBBox(): { x: number; y: number; w: number; h: number } | null {
+		const rects = [
+			...frames.map((f: any) => ({ x: f.x, y: f.y, w: f.w, h: f.h })),
+			...shapes.map((s) => ({ x: s.x, y: s.y, w: s.w, h: s.h })),
+		]
+		if (!rects.length) return null
+		let minX = Infinity
+		let minY = Infinity
+		let maxX = -Infinity
+		let maxY = -Infinity
+		for (const r of rects) {
+			minX = Math.min(minX, r.x)
+			minY = Math.min(minY, r.y)
+			maxX = Math.max(maxX, r.x + r.w)
+			maxY = Math.max(maxY, r.y + r.h)
+		}
+		return { x: minX, y: minY, w: maxX - minX, h: maxY - minY }
+	}
+	// render the WHOLE board (content bbox + padding, not just the viewport) to a PNG
+	// dataURL. The stage transform is temporarily reset so toDataURL crops in world
+	// coords, then restored — the on-screen view never visibly moves.
+	// maxPx caps the output's larger edge (pixelRatio shrinks for huge boards).
+	async function boardPng(transparent: boolean, maxPx = 4096): Promise<string | null> {
+		const stage = stageRef.current
+		const bbox = contentBBox()
+		if (!stage || !bbox) return null
+		const PAD = 30
+		const w = bbox.w + PAD * 2
+		const h = bbox.h + PAD * 2
+		const pixelRatio = Math.min(2, maxPx / w, maxPx / h)
+		const prev = { x: stage.x(), y: stage.y(), scaleX: stage.scaleX(), scaleY: stage.scaleY() }
+		flushSync(() => setExporting(true)) // mount viewport-culled (off-screen) nodes before capture
+		stage.position({ x: PAD - bbox.x, y: PAD - bbox.y })
+		stage.scale({ x: 1, y: 1 })
+		const dataUrl = stage.toDataURL({ x: 0, y: 0, width: w, height: h, pixelRatio })
+		stage.position({ x: prev.x, y: prev.y })
+		stage.scale({ x: prev.scaleX, y: prev.scaleY })
+		flushSync(() => setExporting(false))
+		if (transparent) return dataUrl
+		// composite onto paper matching the CURRENT theme (Konva canvas itself is transparent)
+		const paper = getComputedStyle(document.documentElement).getPropertyValue('--paper').trim() || '#f1ece1'
+		return new Promise((resolve) => {
+			const img = new Image()
+			img.onload = () => {
+				const c = document.createElement('canvas')
+				c.width = img.width
+				c.height = img.height
+				const ctx = c.getContext('2d')!
+				ctx.fillStyle = paper
+				ctx.fillRect(0, 0, c.width, c.height)
+				ctx.drawImage(img, 0, 0)
+				resolve(c.toDataURL('image/png'))
+			}
+			img.onerror = () => resolve(dataUrl)
+			img.src = dataUrl
+		})
+	}
+	// copy the whole-board PNG to the clipboard (paste straight into chats / docs)
+	async function copyPngToClipboard() {
+		if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') {
+			setBusy('此瀏覽器不支援複製圖片,請改用「下載 PNG」')
+			return
+		}
+		setBusy('產生整板圖片中…')
+		try {
+			// pass a Promise<Blob> so Safari accepts the write inside the user gesture
+			const blobPromise = (async () => {
+				const url = await boardPng(pngTransparent)
+				if (!url) throw new Error('empty board')
+				return await (await fetch(url)).blob()
+			})()
+			await navigator.clipboard.write([new ClipboardItem({ 'image/png': blobPromise })])
+			setBusy('已複製整板圖片,直接貼上即可')
+		} catch {
+			setBusy(contentBBox() ? '複製失敗(瀏覽器拒絕),請改用「下載 PNG」' : '板上沒有內容,先加幾張卡再複製')
+		}
 	}
 	// the Konva stage canvas is transparent (the paper grid is CSS, not drawn).
 	// transparent=true exports as-is; otherwise composite onto a paper background.
@@ -666,26 +758,15 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 			}
 			inp.click()
 		}
-		function exportPng(transparent: boolean) {
-		const stage = stageRef.current
-		if (!stage) return
-		const dataUrl = stage.toDataURL({ pixelRatio: 2 })
-		if (transparent) {
-			downloadUri(dataUrl)
+		async function exportPng(transparent: boolean) {
+		setBusy('產生整板 PNG…')
+		const url = await boardPng(transparent)
+		if (!url) {
+			setBusy('板上沒有內容,先加幾張卡再匯出')
 			return
 		}
-		const img = new Image()
-		img.onload = () => {
-			const c = document.createElement('canvas')
-			c.width = img.width
-			c.height = img.height
-			const ctx = c.getContext('2d')!
-			ctx.fillStyle = '#f1ece1' // paper
-			ctx.fillRect(0, 0, c.width, c.height)
-			ctx.drawImage(img, 0, 0)
-			downloadUri(c.toDataURL('image/png'))
-		}
-		img.src = dataUrl
+		downloadUri(url)
+		setBusy('已下載整板 PNG')
 	}
 
 	useEffect(() => {
@@ -872,6 +953,28 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 		else setSearchIdx(0)
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [searchQ])
+	// --- viewport culling: skip rendering stickies/connectors far outside the view.
+	// Margin 200 screen px so fast pans never show pop-in; the dragged / selected /
+	// editing / pending-connect card is always rendered (a culled node mid-drag would
+	// unmount under the pointer), and exports render everything.
+	const CULL_MARGIN = 200
+	const viewWorld = {
+		x: (-view.x - CULL_MARGIN) / view.scale,
+		y: (-view.y - CULL_MARGIN) / view.scale,
+		w: (size.w + CULL_MARGIN * 2) / view.scale,
+		h: (size.h + CULL_MARGIN * 2) / view.scale,
+	}
+	const rectInView = (x: number, y: number, w: number, h: number) =>
+		x + w > viewWorld.x && x < viewWorld.x + viewWorld.w && y + h > viewWorld.y && y < viewWorld.y + viewWorld.h
+	const stickyVisible = (s: Sticky) =>
+		exporting || s.id === selectedId || s.id === editing?.id || s.id === connectFrom || rectInView(s.x, s.y, s.w, s.h)
+	// a connector (straight or elbow) always stays inside the union bbox of its two cards
+	const connVisible = (c: Connector, a: Sticky, b: Sticky) => {
+		if (exporting || c.id === selectedConnId) return true
+		const x = Math.min(a.x, b.x)
+		const y = Math.min(a.y, b.y)
+		return rectInView(x, y, Math.max(a.x + a.w, b.x + b.w) - x, Math.max(a.y + a.h, b.y + b.h) - y)
+	}
 	// which frame (diagram) contains a canvas point — topmost wins
 	const frameAt = (cx: number, cy: number) => {
 		for (let i = frames.length - 1; i >= 0; i--) {
@@ -1679,11 +1782,8 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 								fill={ct.frameFill}
 								stroke={ct.frameStroke}
 								strokeWidth={1.5}
-								shadowColor={ct.frameShadow}
-								shadowBlur={22}
-								shadowOpacity={0.6}
-								shadowOffsetY={7}
 								listening={false}
+								{...PERF}
 							/>
 							{/* title bar = drag handle (moves frame + its cards); double-click to rename */}
 							<Rect
@@ -1693,6 +1793,7 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 								height={34}
 								cornerRadius={[18, 18, 0, 0]}
 								fill={ct.frameHeader}
+								{...PERF}
 								draggable
 								onDragMove={(e: any) => {
 									const dx = e.target.x() - f.x
@@ -1716,6 +1817,7 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 								fontFamily={CANVAS_FONT}
 								fill={ct.frameTitle}
 								listening={false}
+								{...PERF}
 							/>
 							{/* delete this whole diagram (frame + its cards) */}
 							<Group
@@ -1732,8 +1834,8 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 								onMouseEnter={(e: any) => (e.target.getStage().container().style.cursor = 'pointer')}
 								onMouseLeave={(e: any) => (e.target.getStage().container().style.cursor = 'default')}
 							>
-								<Rect width={22} height={20} cornerRadius={7} fill={ct.frameHeader} />
-								<Text width={22} height={20} text="✕" fontSize={13} fontFamily={CANVAS_FONT} fill={ct.frameTitle} align="center" verticalAlign="middle" />
+								<Rect width={22} height={20} cornerRadius={7} fill={ct.frameHeader} {...PERF} />
+								<Text width={22} height={20} text="✕" fontSize={13} fontFamily={CANVAS_FONT} fill={ct.frameTitle} align="center" verticalAlign="middle" listening={false} {...PERF} />
 							</Group>
 							{/* resize handle (bottom-right) — themed corner grip */}
 							<Rect
@@ -1745,6 +1847,7 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 								fill={ct.handle}
 								stroke={ct.handleStroke}
 								strokeWidth={1.5}
+								{...PERF}
 								draggable
 								onDragMove={(e: any) => {
 									const w = Math.max(280, e.target.x() - f.x + 20)
@@ -1762,6 +1865,7 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 						const a = byId(c.from)
 						const b = byId(c.to)
 						if (!a || !b) return null
+						if (!connVisible(c, a, b)) return null // viewport culling
 						const ac: [number, number] = [a.x + a.w / 2, a.y + a.h / 2]
 						const bc: [number, number] = [b.x + b.w / 2, b.y + b.h / 2]
 						const [x1, y1] = edgePoint(ac[0], ac[1], a.w / 2, a.h / 2, bc[0], bc[1])
@@ -1786,6 +1890,7 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 								pointerLength={10}
 								pointerWidth={10}
 								tension={0}
+								{...PERF}
 								onClick={() => {
 									setSelectedConnId(c.id)
 									setSelectedId(null)
@@ -1797,7 +1902,7 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 							/>
 						)
 					})}
-					{shapes.map((s) => {
+					{shapes.filter(stickyVisible).map((s) => {
 						const selected = s.id === selectedId
 						const pending = s.id === connectFrom
 						return (
@@ -1838,14 +1943,16 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 									shadowOpacity={selected ? 0.28 : 0.17}
 									shadowBlur={selected ? 26 : 18}
 									shadowOffsetY={selected ? 12 : 8}
+									shadowForStrokeEnabled={false}
 									stroke={pending ? ACCENT : selected ? '#1c1a17' : 'rgba(255,255,255,0.45)'}
 									strokeWidth={pending ? 3 : selected ? 2 : 1}
+									{...PERF}
 								/>
 								{/* kind accent dot */}
-								<Circle x={18} y={18} radius={5} fill={KIND_ACCENT[s.color] ?? '#1c1a17'} opacity={0.8} />
+								<Circle x={18} y={18} radius={5} fill={KIND_ACCENT[s.color] ?? '#1c1a17'} opacity={0.8} listening={false} {...PERF} />
 								{/* editor number (fallback handle: "把 N 號…") — not on notes */}
 								{!(s as any).note && cardNum[s.id] && (
-									<Text x={s.w - 30} y={11} width={20} align="right" text={String(cardNum[s.id])} fontSize={12} fontStyle="600" fontFamily={CANVAS_FONT} fill="rgba(28,26,23,0.4)" listening={false} />
+									<Text x={s.w - 30} y={11} width={20} align="right" text={String(cardNum[s.id])} fontSize={12} fontStyle="600" fontFamily={CANVAS_FONT} fill="rgba(28,26,23,0.4)" listening={false} {...PERF} />
 								)}
 								<Text
 									text={s.text}
@@ -1859,6 +1966,8 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 									fill="#1f1c18"
 									align="center"
 									verticalAlign="middle"
+									listening={false}
+									{...PERF}
 								/>
 								{/* content tags (top row) — click to filter by tag */}
 								{(() => {
@@ -1875,8 +1984,8 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 												onClick={(e: any) => { e.cancelBubble = true; setFilter({ type: 'tag', value: t }) }}
 												onTap={(e: any) => { e.cancelBubble = true; setFilter({ type: 'tag', value: t }) }}
 											>
-												<Rect width={w} height={17} cornerRadius={8} fill="rgba(28,26,23,0.1)" />
-												<Text x={6} y={3} text={t} fontSize={10.5} fontFamily={CANVAS_FONT} fill="rgba(28,26,23,0.6)" />
+												<Rect width={w} height={17} cornerRadius={8} fill="rgba(28,26,23,0.1)" {...PERF} />
+												<Text x={6} y={3} text={t} fontSize={10.5} fontFamily={CANVAS_FONT} fill="rgba(28,26,23,0.6)" listening={false} {...PERF} />
 											</Group>
 										)
 									})
@@ -1893,8 +2002,8 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 											onClick={(e: any) => { e.cancelBubble = true; setFilter({ type: 'owner', value: person }) }}
 											onTap={(e: any) => { e.cancelBubble = true; setFilter({ type: 'owner', value: person }) }}
 										>
-											<Rect width={w} height={19} cornerRadius={9.5} fill={s.owner ? 'rgba(180,83,10,0.18)' : 'rgba(28,26,23,0.1)'} />
-											<Text x={9} y={3.5} text={person} fontSize={11} fontFamily={CANVAS_FONT} fontStyle={s.owner ? '600' : 'normal'} fill={s.owner ? '#8a3f08' : 'rgba(28,26,23,0.6)'} />
+											<Rect width={w} height={19} cornerRadius={9.5} fill={s.owner ? 'rgba(180,83,10,0.18)' : 'rgba(28,26,23,0.1)'} {...PERF} />
+											<Text x={9} y={3.5} text={person} fontSize={11} fontFamily={CANVAS_FONT} fontStyle={s.owner ? '600' : 'normal'} fill={s.owner ? '#8a3f08' : 'rgba(28,26,23,0.6)'} listening={false} {...PERF} />
 										</Group>
 									)
 								})()}
@@ -1904,20 +2013,9 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 					{/* live cursors of everyone else (Mori + other humans) */}
 					{cursors.map((c) => (
 						<Group key={c.id} x={c.x} y={c.y} listening={false}>
-							<Circle radius={7} fill={c.color} stroke="#fff" strokeWidth={2} shadowColor="#1c1a17" shadowOpacity={0.25} shadowBlur={6} shadowOffsetY={2} />
-							<Rect
-								x={11}
-								y={-10}
-								width={c.name.length * 8.5 + 16}
-								height={20}
-								cornerRadius={10}
-								fill={c.color}
-								shadowColor="#1c1a17"
-								shadowOpacity={0.2}
-								shadowBlur={6}
-								shadowOffsetY={2}
-							/>
-							<Text x={19} y={-6} text={c.name} fontSize={12} fontFamily={CANVAS_FONT} fontStyle="600" fill="#fff" />
+							<Circle radius={7} fill={c.color} stroke="#fff" strokeWidth={2} {...PERF} />
+							<Rect x={11} y={-10} width={c.name.length * 8.5 + 16} height={20} cornerRadius={10} fill={c.color} {...PERF} />
+							<Text x={19} y={-6} text={c.name} fontSize={12} fontFamily={CANVAS_FONT} fontStyle="600" fill="#fff" {...PERF} />
 						</Group>
 					))}
 				</Layer>
@@ -2424,8 +2522,8 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 							style={{ display: 'block', width: '100%', textAlign: 'left', marginBottom: 8, padding: '11px 12px' }}
 							onClick={() => { exportHtml(); setExportOpen(false) }}
 						>
-							<div style={{ fontWeight: 600, fontSize: 14 }}>白板紀錄 (HTML) · 含逐字稿</div>
-							<div style={{ fontSize: 12, color: 'var(--ink-soft)' }}>下載 .html —— 摘要 + 逐字稿,雙擊就能在瀏覽器看</div>
+							<div style={{ fontWeight: 600, fontSize: 14 }}>白板紀錄 (HTML) · 含板圖與逐字稿</div>
+							<div style={{ fontSize: 12, color: 'var(--ink-soft)' }}>下載 .html —— 整板快照圖 + 摘要 + 逐字稿,離線雙擊就能看</div>
 						</button>
 						<button
 							style={{ display: 'block', width: '100%', textAlign: 'left', marginBottom: 8, padding: '11px 12px' }}
@@ -2438,24 +2536,37 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 							<div style={{ fontSize: 12, color: 'var(--ink-soft)' }}>下載 .md —— 每張圖一個區段</div>
 						</button>
 						<div style={{ border: '1px solid var(--line)', borderRadius: 12, padding: '11px 12px', marginBottom: 12 }}>
-							<div style={{ fontWeight: 600, fontSize: 14 }}>白板圖片 (PNG)</div>
+							<div style={{ fontWeight: 600, fontSize: 14 }}>白板圖片 (PNG) · 整板</div>
+							<div style={{ fontSize: 12, color: 'var(--ink-soft)', marginTop: 2 }}>輸出完整板面(含畫面外的卡片),紙底顏色跟著目前主題</div>
 							<div style={{ display: 'flex', gap: 16, margin: '8px 0', fontSize: 13 }}>
 								<label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, cursor: 'pointer' }}>
-									<input type="radio" checked={!pngTransparent} onChange={() => setPngTransparent(false)} /> 紙底(白)
+									<input type="radio" checked={!pngTransparent} onChange={() => setPngTransparent(false)} /> 紙底(依主題)
 								</label>
 								<label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, cursor: 'pointer' }}>
 									<input type="radio" checked={pngTransparent} onChange={() => setPngTransparent(true)} /> 透明底
 								</label>
 							</div>
-							<button
-								className="btn-primary" style={{ width: '100%' }}
-								onClick={() => {
-									exportPng(pngTransparent)
-									setExportOpen(false)
-								}}
-							>
-								下載 PNG
-							</button>
+							<div style={{ display: 'flex', gap: 8 }}>
+								<button
+									className="btn-primary" style={{ flex: 1 }}
+									onClick={() => {
+										void exportPng(pngTransparent)
+										setExportOpen(false)
+									}}
+								>
+									下載 PNG
+								</button>
+								<button
+									style={{ flex: 1 }}
+									title="把整板 PNG 放進剪貼簿,到聊天軟體 / 文件直接貼上"
+									onClick={() => {
+										void copyPngToClipboard()
+										setExportOpen(false)
+									}}
+								>
+									複製到剪貼簿
+								</button>
+							</div>
 						</div>
 						<button style={{ width: '100%' }} onClick={() => setExportOpen(false)}>
 							關閉
