@@ -234,7 +234,7 @@ curl -X POST localhost:1334/api/visualize -H 'Content-Type: application/json' \
 - **房間 + 分享**:進場名字 gate、自動房號、QR、輸入房號加入、房間清單、結束此房。
 - **持久化**:每房 `.data/<room>.bin`,重啟自動還原。
 - **多裝置 / 手機**:Rust 自帶 HTTPS(`npm run start:lan`)或部署到 Render;手機可看可編可錄,responsive + 雙指縮放。
-- **硬化 / 隱私 / 部署**:per-IP rate-limit(`DEMO_RATE_PER_MIN`)、贊助 banner、`.env` 設定、`LLM_LOCAL_ONLY=1`(全走本機)、Dockerfile + render.yaml + `deploy/` systemd/nginx 範例。
+- **硬化 / 隱私 / 部署**:per-IP rate-limit(`DEMO_RATE_PER_MIN`)、贊助 banner、`.env` 設定、`LLM_LOCAL_ONLY=1`(開機鎖定本機模式:AI 只走本機 Ollama、雲端 STT 與訪客 BYO 端點一律封鎖、設定頁/API 關不掉)、Dockerfile + render.yaml + `deploy/` systemd/nginx 範例。
 
 ![presence](docs/presence.png)
 
