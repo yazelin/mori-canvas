@@ -242,6 +242,27 @@ fn rate_limited_reply(wait: u64) -> warp::reply::Response {
 #[derive(Debug)]
 struct RateLimited(u64);
 impl warp::reject::Reject for RateLimited {}
+/// MAX_ROOMS 滿時的 custom rejection:recover 轉成 503 + 友善 JSON(client 直接顯示 error)
+#[derive(Debug)]
+struct RoomsFull(String);
+impl warp::reject::Reject for RoomsFull {}
+/// 所有端點開房的唯一入口:超過 MAX_ROOMS 的「全新房」轉成 RoomsFull rejection
+async fn open_room(
+    rooms: &sync::Rooms,
+    name: &str,
+) -> Result<Arc<sync::Room>, warp::Rejection> {
+    sync::get_or_create_room(rooms, name)
+        .await
+        .map_err(|e| warp::reject::custom(RoomsFull(e)))
+}
+/// PUBLIC_ROOM_LIST env 解析(純函數供測試):未設或其他值 = 公開(自架現狀);
+/// "0" / "false" = 房間清單只回數量、不回房號(demo 預設 — 房號即進房鑰匙)。
+fn parse_public_room_list(v: Option<&str>) -> bool {
+    match v.map(str::trim) {
+        Some(s) => !(s == "0" || s.eq_ignore_ascii_case("false")),
+        None => true,
+    }
+}
 /// 掛在吃 AI/STT 的端點前面:超限就以 custom rejection 中斷,由 recover 轉成 429
 fn rate_limit() -> impl Filter<Extract = (), Error = warp::Rejection> + Clone {
     warp::header::optional::<String>("x-forwarded-for")
@@ -259,6 +280,13 @@ fn rate_limit() -> impl Filter<Extract = (), Error = warp::Rejection> + Clone {
 async fn handle_rejection(err: warp::Rejection) -> Result<warp::reply::Response, warp::Rejection> {
     if let Some(RateLimited(w)) = err.find::<RateLimited>() {
         return Ok(rate_limited_reply(*w));
+    }
+    if let Some(RoomsFull(msg)) = err.find::<RoomsFull>() {
+        use warp::Reply;
+        let mut res = warp::reply::json(&json!({ "ok": false, "error": msg, "roomsFull": true }))
+            .into_response();
+        *res.status_mut() = warp::http::StatusCode::SERVICE_UNAVAILABLE;
+        return Ok(res);
     }
     Err(err)
 }
@@ -659,9 +687,50 @@ fn chunk_transcript(t: &str) -> Vec<String> {
     chunks
 }
 
+// 內嵌示範畫板(= client/public/examples/meeting.json,格式 mori-canvas/v1)— 編譯期進 binary,
+// Render 重啟磁碟清空後 DEMO 房一樣種得回來。
+static DEMO_BOARD_JSON: &str = include_str!("../../client/public/examples/meeting.json");
+
+/// 常駐示範房 ?room=DEMO:啟動時 .data/DEMO.bin 不存在就從種子種出來;
+/// 之後每小時重置回種子內容(防塗改)。TTL 清理對 DEMO 豁免(sync::ttl_exempt)。
+fn spawn_demo_room(rooms: sync::Rooms) {
+    tokio::spawn(async move {
+        let data: Value = match serde_json::from_str(DEMO_BOARD_JSON) {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("demo board seed json broken: {e}");
+                return;
+            }
+        };
+        let mut first = true;
+        let mut tick = tokio::time::interval(std::time::Duration::from_secs(3600));
+        loop {
+            tick.tick().await; // 第一次 tick 立即觸發 => 啟動時就檢查
+            // 啟動那次:已有 DEMO 檔就尊重現有內容(等一小時後的重置);之後每小時必重置
+            let seed_now = !first || !sync::room_file_exists(sync::DEMO_ROOM);
+            let label = if first { "startup seed" } else { "hourly reset" };
+            first = false;
+            if !seed_now {
+                continue;
+            }
+            match sync::get_or_create_room(&rooms, sync::DEMO_ROOM).await {
+                Ok(room) => {
+                    store::seed_board(&room, &data);
+                    let spacing = SETTINGS.lock().await.spacing;
+                    apply::tidy_board(&room, spacing);
+                    println!("demo room {:?}: {label}", sync::DEMO_ROOM);
+                }
+                Err(e) => eprintln!("demo room seed failed: {e}"),
+            }
+        }
+    });
+}
+
 pub async fn serve(port: u16) {
     let rooms = sync::new_rooms();
     sync::init_persistence(rooms.clone());
+    sync::spawn_room_ttl_cleaner(rooms.clone()); // ROOM_TTL_HOURS=0(預設)時不啟動
+    spawn_demo_room(rooms.clone());
 
     // --- websocket sync (any path; strips optional sync/ prefix) ---
     let rooms_ws = rooms.clone();
@@ -676,7 +745,7 @@ pub async fn serve(port: u16) {
                 let name = percent_encoding::percent_decode_str(&name)
                     .decode_utf8_lossy()
                     .to_string();
-                let room = sync::get_or_create_room(&rooms, &name).await;
+                let room = open_room(&rooms, &name).await?;
                 Ok::<_, warp::Rejection>(ws.on_upgrade(move |socket| sync::peer(socket, room)))
             }
         },
@@ -689,20 +758,28 @@ pub async fn serve(port: u16) {
         .and(warp::path!("api" / "lan"))
         .map(|| warp::reply::json(&json!({ "ip": lan_ip() })));
 
-    // GET /api/rooms — active rooms (shapes + online counts)
+    // GET /api/rooms — active rooms (shapes + online counts)。
+    // PUBLIC_ROOM_LIST=0(demo 預設)時只回 count 不回房號 — 房號即進房鑰匙,不能列給任何人。
     let r_rooms = rooms.clone();
     let rooms_list = warp::get()
         .and(warp::path!("api" / "rooms"))
         .and(with(r_rooms))
         .and_then(|rooms: sync::Rooms| async move {
             let map = rooms.read().await;
+            if !parse_public_room_list(std::env::var("PUBLIC_ROOM_LIST").ok().as_deref()) {
+                return Ok::<_, warp::Rejection>(warp::reply::json(
+                    &json!({ "ok": true, "count": map.len() }),
+                ));
+            }
             let mut out = vec![];
             for (id, room) in map.iter() {
                 let shapes = store::read_map(room, "shapes").len();
                 let online = room.online.load(std::sync::atomic::Ordering::Relaxed);
                 out.push(json!({ "id": id, "shapes": shapes, "online": online }));
             }
-            Ok::<_, warp::Rejection>(warp::reply::json(&json!({ "ok": true, "rooms": out })))
+            Ok(warp::reply::json(
+                &json!({ "ok": true, "count": out.len(), "rooms": out }),
+            ))
         });
 
     // POST /api/rooms/:room/tidy
@@ -711,7 +788,7 @@ pub async fn serve(port: u16) {
         .and(warp::path!("api" / "rooms" / String / "tidy"))
         .and(with(r_tidy))
         .and_then(|name: String, rooms: sync::Rooms| async move {
-            let room = sync::get_or_create_room(&rooms, &name).await;
+            let room = open_room(&rooms, &name).await?;
             let (mtype, _topic) = store::read_meta(&room);
             let sp = SETTINGS.lock().await.spacing;
             let shapes = store::read_map(&room, "shapes");
@@ -728,7 +805,7 @@ pub async fn serve(port: u16) {
         .and(warp::path!("api" / "rooms" / String / "end"))
         .and(with(r_end))
         .and_then(|name: String, rooms: sync::Rooms| async move {
-            let room = sync::get_or_create_room(&rooms, &name).await;
+            let room = open_room(&rooms, &name).await?;
             store::clear_room(&room);
             Ok::<_, warp::Rejection>(warp::reply::json(&json!({ "ok": true })))
         });
@@ -736,7 +813,7 @@ pub async fn serve(port: u16) {
     // GET/POST /api/rooms/:room/meta
     let r_meta_g = rooms.clone();
     let meta_get = warp::get().and(warp::path!("api" / "rooms" / String / "meta")).and(with(r_meta_g)).and_then(|name: String, rooms: sync::Rooms| async move {
-        let room = sync::get_or_create_room(&rooms, &name).await;
+        let room = open_room(&rooms, &name).await?;
         let (typ, topic) = store::read_meta(&room);
         Ok::<_, warp::Rejection>(warp::reply::json(&json!({ "ok": true, "type": typ, "topic": topic, "types": board_types::types_list() })))
     });
@@ -746,7 +823,7 @@ pub async fn serve(port: u16) {
         .and(warp::body::json())
         .and(with(r_meta_p))
         .and_then(|name: String, body: Value, rooms: sync::Rooms| async move {
-            let room = sync::get_or_create_room(&rooms, &name).await;
+            let room = open_room(&rooms, &name).await?;
             let typ = body.get("type").and_then(|v| v.as_str());
             let typ = typ.filter(|t| board_types::BOARD_TYPES.iter().any(|b| b.key == *t));
             let topic = body.get("topic").and_then(|v| v.as_str());
@@ -763,7 +840,7 @@ pub async fn serve(port: u16) {
         .and(warp::path!("api" / "rooms" / String / "frames"))
         .and(with(r_frames_g))
         .and_then(|name: String, rooms: sync::Rooms| async move {
-            let room = sync::get_or_create_room(&rooms, &name).await;
+            let room = open_room(&rooms, &name).await?;
             Ok::<_, warp::Rejection>(warp::reply::json(
                 &json!({ "ok": true, "frames": store::frames_sorted(&room) }),
             ))
@@ -774,7 +851,7 @@ pub async fn serve(port: u16) {
         .and(warp::body::json())
         .and(with(r_frames_p))
         .and_then(|name: String, body: Value, rooms: sync::Rooms| async move {
-            let room = sync::get_or_create_room(&rooms, &name).await;
+            let room = open_room(&rooms, &name).await?;
             let typ = body
                 .get("type")
                 .and_then(|v| v.as_str())
@@ -791,7 +868,7 @@ pub async fn serve(port: u16) {
         .and(warp::path!("api" / "export" / String))
         .and(with(r_export))
         .and_then(|name: String, rooms: sync::Rooms| async move {
-            let room = sync::get_or_create_room(&rooms, &name).await;
+            let room = open_room(&rooms, &name).await?;
             let md = export_markdown(&room);
             Ok::<_, warp::Rejection>(warp::reply::with_header(
                 md,
@@ -808,7 +885,7 @@ pub async fn serve(port: u16) {
         .and(llm_opts())
         .and_then(
             |name: String, rooms: sync::Rooms, llm: llm::LlmOpts| async move {
-                let room = sync::get_or_create_room(&rooms, &name).await;
+                let room = open_room(&rooms, &name).await?;
                 let lo = SETTINGS.lock().await.local_only;
                 let md = summary_markdown(&room, &name, lo, &llm).await;
                 Ok::<_, warp::Rejection>(warp::reply::with_header(
@@ -900,7 +977,7 @@ pub async fn serve(port: u16) {
                     .chars()
                     .take(24)
                     .collect();
-                let room = sync::get_or_create_room(&rooms, &name).await;
+                let room = open_room(&rooms, &name).await?;
                 let s = SETTINGS.lock().await.clone();
                 // stage-1 清稿(可帶 "cleanup": false 跳過):贅字/斷句先處理掉,別讓它進卡片
                 let do_cleanup = body.get("cleanup").and_then(|v| v.as_bool()).unwrap_or(true);
@@ -1008,7 +1085,7 @@ pub async fn serve(port: u16) {
                     .chars()
                     .take(24)
                     .collect();
-                let room = sync::get_or_create_room(&rooms, &name).await;
+                let room = open_room(&rooms, &name).await?;
                 let _lk = room_lock(&name).await;
                 let _guard = _lk.lock().await;
                 let mut res = match apply::run_agent_turn(
@@ -1046,7 +1123,7 @@ pub async fn serve(port: u16) {
                 Ok(t) => t,
                 Err(e) => return Ok::<_, warp::Rejection>(warp::reply::json(&json!({ "ok": false, "error": e }))),
             };
-            let room = sync::get_or_create_room(&rooms, &name).await;
+            let room = open_room(&rooms, &name).await?;
             let cur = apply::card_current(&room, &card_id);
             if cur.is_none() {
                 return Ok::<_, warp::Rejection>(warp::reply::json(&json!({ "ok": false, "error": "card not found", "transcript": transcript })));
@@ -1100,7 +1177,7 @@ pub async fn serve(port: u16) {
                 .filter(|s| !s.is_empty())
                 .map(|s| s.to_string())
                 .unwrap_or_else(|| format!("visualize-{}", store::rid()));
-            let room = sync::get_or_create_room(&rooms, &name).await;
+            let room = open_room(&rooms, &name).await?;
             if let Some(bt) = body.get("board_type").and_then(|v| v.as_str()) {
                 store::set_meta(&room, Some(bt), None);
             }
@@ -1196,7 +1273,13 @@ pub async fn serve(port: u16) {
                     .unwrap(),
             }
         });
-    let routes = api.or(ws).or(serve_client).recover(handle_rejection).with(cors);
+    // recover 要掛在 api / ws 這層:掛在 serve_client 之後的話,GET 端點的 custom rejection
+    // (RoomsFull)會先被 SPA fallback(任意 GET 都回 index.html)吃掉,永遠到不了 recover。
+    let routes = api
+        .recover(handle_rejection)
+        .or(ws.recover(handle_rejection))
+        .or(serve_client)
+        .with(cors);
     maybe_register_body_part(port);
     let _ = Arc::clone(&rooms);
 
@@ -1267,6 +1350,33 @@ mod tests {
             (true, None)
         );
         assert_eq!(apply_local_only_change(false, false, None), (false, None));
+    }
+
+    #[test]
+    fn public_room_list_default_on_demo_off() {
+        // 未設 / 其他值 = 公開(自架現狀不變)
+        assert!(parse_public_room_list(None));
+        assert!(parse_public_room_list(Some("1")));
+        assert!(parse_public_room_list(Some("yes")));
+        assert!(parse_public_room_list(Some("")));
+        // "0" / "false"(含空白、不分大小寫)= 不公開房號
+        assert!(!parse_public_room_list(Some("0")));
+        assert!(!parse_public_room_list(Some(" 0 ")));
+        assert!(!parse_public_room_list(Some("false")));
+        assert!(!parse_public_room_list(Some("FALSE")));
+    }
+
+    #[test]
+    fn demo_board_seed_is_valid_v1_board() {
+        // 內嵌種子必須是合法的 mori-canvas/v1 畫板,卡片/圖框齊全 — 編譯期壞檔在這裡擋下
+        let v: Value = serde_json::from_str(DEMO_BOARD_JSON).expect("demo board json parses");
+        assert_eq!(
+            v.get("format").and_then(|x| x.as_str()),
+            Some("mori-canvas/v1")
+        );
+        assert!(!v["shapes"].as_array().unwrap().is_empty());
+        assert!(!v["frames"].as_array().unwrap().is_empty());
+        assert!(!v["connectors"].as_array().unwrap().is_empty());
     }
 
     #[test]

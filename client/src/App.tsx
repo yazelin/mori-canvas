@@ -266,6 +266,8 @@ export default function App() {
 	const [qrUrl, setQrUrl] = useState('')
 	const [joinCode, setJoinCode] = useState('')
 	const [roomList, setRoomList] = useState<{ id: string; shapes: number; online: number }[]>([])
+	// demo 站 PUBLIC_ROOM_LIST=0 時 /api/rooms 只回 count 不回房號 — 清單空時就顯示這個數字
+	const [roomCount, setRoomCount] = useState(0)
 	const [panelOpen, setPanelOpen] = useState(window.innerWidth >= 700) // collapse agent panel on small screens
 	const [guide, setGuide] = useState(() => !localStorage.getItem('wb-seen-guide')) // first-run onboarding
 	// 範例庫:persona 範例板(client/public/examples/*.json),載入即還原成完整示範畫板
@@ -764,7 +766,10 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 		QRCode.toDataURL(shareUrl, { width: 240, margin: 1 }).then(setQrUrl).catch(() => setQrUrl(''))
 		fetch('/api/rooms')
 			.then((r) => r.json())
-			.then((d) => setRoomList(d.rooms || []))
+			.then((d) => {
+				setRoomList(d.rooms || [])
+				setRoomCount(d.count ?? (d.rooms || []).length)
+			})
 			.catch(() => {})
 	}, [shareOpen, shareUrl])
 
@@ -1828,6 +1833,27 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 					<button className="btn-soft" style={{ pointerEvents: 'auto', marginTop: 6, padding: '8px 18px', fontSize: 13 }} onClick={() => openExamples()}>
 						不知道從哪開始?載入一份範例看看
 					</button>
+					<button
+						className="btn-soft"
+						style={{ pointerEvents: 'auto', padding: '8px 18px', fontSize: 13 }}
+						onClick={async () => {
+							// 不用麥克風也不用打字:把內建示範逐字稿餵給 agent,看卡片自己長出來
+							if (busy.startsWith('agent')) return // 防連點重複送
+							setBusy('agent 思考中…(示範逐字稿整理上板,約十幾秒)')
+							try {
+								const r = await fetch(`${SYNC_HTTP}/api/agent/${encodeURIComponent(room)}`, {
+									method: 'POST',
+									headers: { 'Content-Type': 'application/json', ...byoHeaders() },
+									body: JSON.stringify({ transcript: DEMO_TRANSCRIPT, by: me.name }),
+								}).then((x) => x.json())
+								applyAgentResponse(r, '示範:')
+							} catch (e) {
+								setBusy(`錯誤:${(e as Error).message}`)
+							}
+						}}
+					>
+						用示範逐字稿試試(免麥克風)
+					</button>
 				</div>
 			)}
 
@@ -2496,7 +2522,7 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 								加入
 							</button>
 						</div>
-						{roomList.length > 0 && (
+						{roomList.length > 0 ? (
 							<div style={{ marginTop: 14, textAlign: 'left', maxHeight: 140, overflowY: 'auto' }}>
 								<div style={{ color: 'var(--ink-soft)', fontSize: 12, marginBottom: 4 }}>進行中的房間</div>
 								{roomList.map((r) => (
@@ -2515,7 +2541,12 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 									</div>
 								))}
 							</div>
-						)}
+						) : roomCount > 0 ? (
+							// 此站不公開房號(房號即進房鑰匙):只顯示數量,要進別房請輸入房號
+							<div style={{ marginTop: 14, color: 'var(--ink-soft)', fontSize: 12 }}>
+								目前 {roomCount} 個房間進行中(此站不公開房號,知道房號才能加入)
+							</div>
+						) : null}
 						<div style={{ display: 'flex', gap: 6, marginTop: 14 }}>
 							<button style={{ ...btn, flex: 1, color: 'var(--live)' }} onClick={endThisRoom}>
 								結束此房(清空)

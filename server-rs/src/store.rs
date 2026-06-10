@@ -145,6 +145,51 @@ pub fn create_frame(room: &Room, typ: &str, title: &str) -> Value {
     f
 }
 
+/// 把一份 mori-canvas/v1 畫板 JSON 整批寫進房(同 client 的 applyBoardData):
+/// 先清空 shapes / connectors / frames / transcript,再依檔案內容重建 + 設 meta。
+/// DEMO 示範房的種子與每小時重置都走這裡。
+pub fn seed_board(room: &Room, data: &Value) {
+    use yrs::Array;
+    let doc = room.awareness.doc();
+    let shapes = doc.get_or_insert_map("shapes");
+    let conns = doc.get_or_insert_map("connectors");
+    let frames = doc.get_or_insert_map("frames");
+    let meta = doc.get_or_insert_map("meta");
+    let transcript = doc.get_or_insert_array("transcript");
+    let mut txn = doc.transact_mut();
+    shapes.clear(&mut txn);
+    conns.clear(&mut txn);
+    frames.clear(&mut txn);
+    let tlen = transcript.len(&txn);
+    if tlen > 0 {
+        transcript.remove_range(&mut txn, 0, tlen);
+    }
+    let insert_all = |txn: &mut yrs::TransactionMut, map: &yrs::MapRef, key: &str| {
+        for item in data.get(key).and_then(|v| v.as_array()).into_iter().flatten() {
+            if let Some(id) = item.get("id").and_then(|v| v.as_str()) {
+                map.insert(txn, id.to_string(), json_to_any(item));
+            }
+        }
+    };
+    insert_all(&mut txn, &frames, "frames");
+    insert_all(&mut txn, &shapes, "shapes");
+    insert_all(&mut txn, &conns, "connectors");
+    for line in data
+        .get("transcript")
+        .and_then(|v| v.as_array())
+        .into_iter()
+        .flatten()
+    {
+        transcript.push_back(&mut txn, json_to_any(line));
+    }
+    if let Some(t) = data.pointer("/meta/type").and_then(|v| v.as_str()) {
+        meta.insert(&mut txn, "type", t.to_string());
+    }
+    if let Some(t) = data.pointer("/meta/topic").and_then(|v| v.as_str()) {
+        meta.insert(&mut txn, "topic", t.to_string());
+    }
+}
+
 /// clear all shapes + connectors + frames (room end / clear)
 pub fn clear_room(room: &Room) {
     let doc = room.awareness.doc();
