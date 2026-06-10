@@ -1,6 +1,7 @@
 mod agent;
 mod apply;
 mod board_types;
+mod cleanup;
 mod layout;
 mod llm;
 mod prompts;
@@ -485,7 +486,7 @@ fn summary_board_input_from_parts(
     (title, input)
 }
 
-fn strip_think(s: &str) -> String {
+pub(crate) fn strip_think(s: &str) -> String {
     let mut out = s.to_string();
     while let (Some(a), Some(b)) = (out.find("<think>"), out.find("</think>")) {
         if b > a {
