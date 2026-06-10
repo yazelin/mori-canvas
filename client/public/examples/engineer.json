@@ -1,0 +1,43 @@
+{
+  "format": "mori-canvas/v1",
+  "meta": { "type": "architecture", "topic": "預約系統設計討論" },
+  "frames": [
+    { "id": "f-1", "title": "預約系統架構", "type": "architecture", "x": 80, "y": 80, "w": 480, "h": 320 },
+    { "id": "f-2", "title": "LINE 預約流程", "type": "flow", "x": 80, "y": 80, "w": 480, "h": 320 }
+  ],
+  "shapes": [
+    { "id": "c-1", "type": "sticky", "text": "LINE LIFF 頁面", "color": "blue", "x": 0, "y": 0, "w": 200, "h": 200, "frameId": "f-1", "drawnBy": "Mori" },
+    { "id": "c-2", "type": "sticky", "text": "診所後台網頁", "color": "blue", "x": 0, "y": 0, "w": 200, "h": 200, "frameId": "f-1", "drawnBy": "Mori" },
+    { "id": "c-3", "type": "sticky", "text": "API 閘道", "color": "green", "x": 0, "y": 0, "w": 200, "h": 200, "frameId": "f-1", "drawnBy": "Mori" },
+    { "id": "c-4", "type": "sticky", "text": "預約服務", "color": "green", "x": 0, "y": 0, "w": 200, "h": 200, "frameId": "f-1", "drawnBy": "Mori" },
+    { "id": "c-5", "type": "sticky", "text": "通知服務", "color": "green", "x": 0, "y": 0, "w": 200, "h": 200, "frameId": "f-1", "drawnBy": "Mori" },
+    { "id": "c-6", "type": "sticky", "text": "PostgreSQL", "color": "yellow", "x": 0, "y": 0, "w": 200, "h": 200, "frameId": "f-1", "drawnBy": "Mori" },
+    { "id": "c-7", "type": "sticky", "text": "Redis 快取", "color": "yellow", "x": 0, "y": 0, "w": 200, "h": 200, "frameId": "f-1", "drawnBy": "Mori" },
+    { "id": "c-8", "type": "sticky", "text": "LINE 訊息 API", "color": "red", "x": 0, "y": 0, "w": 200, "h": 200, "frameId": "f-1", "drawnBy": "Mori" },
+    { "id": "c-9", "type": "sticky", "text": "HIS 掛號系統", "color": "red", "x": 0, "y": 0, "w": 200, "h": 200, "frameId": "f-1", "drawnBy": "Mori" },
+    { "id": "c-10", "type": "sticky", "text": "使用者點預約", "color": "green", "x": 0, "y": 0, "w": 200, "h": 200, "frameId": "f-2", "drawnBy": "Mori" },
+    { "id": "c-11", "type": "sticky", "text": "選擇科別醫師", "color": "yellow", "x": 0, "y": 0, "w": 200, "h": 200, "frameId": "f-2", "drawnBy": "Mori" },
+    { "id": "c-12", "type": "sticky", "text": "選擇日期時段", "color": "yellow", "x": 0, "y": 0, "w": 200, "h": 200, "frameId": "f-2", "drawnBy": "Mori" },
+    { "id": "c-13", "type": "sticky", "text": "時段尚有名額?", "color": "blue", "x": 0, "y": 0, "w": 200, "h": 200, "frameId": "f-2", "drawnBy": "Mori" },
+    { "id": "c-14", "type": "sticky", "text": "建立預約寫入", "color": "yellow", "x": 0, "y": 0, "w": 200, "h": 200, "frameId": "f-2", "drawnBy": "Mori" },
+    { "id": "c-15", "type": "sticky", "text": "提示改選時段", "color": "red", "x": 0, "y": 0, "w": 200, "h": 200, "frameId": "f-2", "drawnBy": "Mori" },
+    { "id": "c-16", "type": "sticky", "text": "預約完成通知", "color": "red", "x": 0, "y": 0, "w": 200, "h": 200, "frameId": "f-2", "drawnBy": "Mori" }
+  ],
+  "connectors": [
+    { "id": "k-1", "from": "c-1", "to": "c-3" },
+    { "id": "k-2", "from": "c-2", "to": "c-3" },
+    { "id": "k-3", "from": "c-3", "to": "c-4" },
+    { "id": "k-4", "from": "c-4", "to": "c-6" },
+    { "id": "k-5", "from": "c-4", "to": "c-7" },
+    { "id": "k-6", "from": "c-4", "to": "c-9" },
+    { "id": "k-7", "from": "c-4", "to": "c-5" },
+    { "id": "k-8", "from": "c-5", "to": "c-8" },
+    { "id": "k-9", "from": "c-10", "to": "c-11" },
+    { "id": "k-10", "from": "c-11", "to": "c-12" },
+    { "id": "k-11", "from": "c-12", "to": "c-13" },
+    { "id": "k-12", "from": "c-13", "to": "c-14" },
+    { "id": "k-13", "from": "c-13", "to": "c-15" },
+    { "id": "k-14", "from": "c-14", "to": "c-16" }
+  ],
+  "transcript": []
+}

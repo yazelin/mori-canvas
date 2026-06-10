@@ -1,0 +1,38 @@
+{
+  "format": "mori-canvas/v1",
+  "meta": { "type": "kanban", "topic": "Sprint 14 規劃" },
+  "frames": [
+    { "id": "f-1", "title": "Sprint 14 看板", "type": "kanban", "x": 80, "y": 80, "w": 480, "h": 320 },
+    { "id": "f-2", "title": "Q3 里程碑", "type": "gantt", "x": 80, "y": 80, "w": 480, "h": 320 }
+  ],
+  "shapes": [
+    { "id": "c-1", "type": "sticky", "text": "購物車結帳流程", "color": "red", "x": 0, "y": 0, "w": 200, "h": 200, "frameId": "f-1", "drawnBy": "Mori", "tags": ["前端"] },
+    { "id": "c-2", "type": "sticky", "text": "訂單匯出報表", "color": "red", "x": 0, "y": 0, "w": 200, "h": 200, "frameId": "f-1", "drawnBy": "Mori" },
+    { "id": "c-3", "type": "sticky", "text": "推播訊息排程", "color": "red", "x": 0, "y": 0, "w": 200, "h": 200, "frameId": "f-1", "drawnBy": "Mori", "owner": "雅婷" },
+    { "id": "c-4", "type": "sticky", "text": "優惠券核銷介面", "color": "red", "x": 0, "y": 0, "w": 200, "h": 200, "frameId": "f-1", "drawnBy": "Mori" },
+    { "id": "c-5", "type": "sticky", "text": "會員登入改版", "color": "yellow", "x": 0, "y": 0, "w": 200, "h": 200, "frameId": "f-1", "drawnBy": "Mori", "owner": "家豪", "tags": ["前端"] },
+    { "id": "c-6", "type": "sticky", "text": "金流串接測試", "color": "yellow", "x": 0, "y": 0, "w": 200, "h": 200, "frameId": "f-1", "drawnBy": "Mori", "owner": "志明", "tags": ["金流"] },
+    { "id": "c-7", "type": "sticky", "text": "商品搜尋優化", "color": "yellow", "x": 0, "y": 0, "w": 200, "h": 200, "frameId": "f-1", "drawnBy": "Mori", "owner": "雅婷" },
+    { "id": "c-8", "type": "sticky", "text": "資料庫索引調整", "color": "green", "x": 0, "y": 0, "w": 200, "h": 200, "frameId": "f-1", "drawnBy": "Mori", "owner": "家豪" },
+    { "id": "c-9", "type": "sticky", "text": "首頁改版上線", "color": "green", "x": 0, "y": 0, "w": 200, "h": 200, "frameId": "f-1", "drawnBy": "Mori" },
+    { "id": "c-10", "type": "sticky", "text": "客服表單修復", "color": "green", "x": 0, "y": 0, "w": 200, "h": 200, "frameId": "f-1", "drawnBy": "Mori", "tags": ["bug"] },
+    { "id": "c-11", "type": "sticky", "text": "發票 API 等廠商", "color": "blue", "x": 0, "y": 0, "w": 200, "h": 200, "frameId": "f-1", "drawnBy": "Mori", "tags": ["阻塞"] },
+    { "id": "c-12", "type": "sticky", "text": "iOS 審核被退件", "color": "blue", "x": 0, "y": 0, "w": 200, "h": 200, "frameId": "f-1", "drawnBy": "Mori", "owner": "志明" },
+    { "id": "c-13", "type": "sticky", "text": "需求規格凍結", "color": "green", "x": 0, "y": 0, "w": 200, "h": 200, "frameId": "f-2", "drawnBy": "Mori", "owner": "志明" },
+    { "id": "c-14", "type": "sticky", "text": "UI 設計定稿", "color": "green", "x": 0, "y": 0, "w": 200, "h": 200, "frameId": "f-2", "drawnBy": "Mori", "owner": "雅婷" },
+    { "id": "c-15", "type": "sticky", "text": "核心功能開發", "color": "yellow", "x": 0, "y": 0, "w": 200, "h": 200, "frameId": "f-2", "drawnBy": "Mori", "owner": "家豪" },
+    { "id": "c-16", "type": "sticky", "text": "金流介接", "color": "red", "x": 0, "y": 0, "w": 200, "h": 200, "frameId": "f-2", "drawnBy": "Mori", "owner": "志明" },
+    { "id": "c-17", "type": "sticky", "text": "整合測試", "color": "blue", "x": 0, "y": 0, "w": 200, "h": 200, "frameId": "f-2", "drawnBy": "Mori", "owner": "雅婷" },
+    { "id": "c-18", "type": "sticky", "text": "正式上線", "color": "blue", "x": 0, "y": 0, "w": 200, "h": 200, "frameId": "f-2", "drawnBy": "Mori", "owner": "家豪" },
+    { "id": "c-19", "type": "sticky", "text": "上線後監控", "color": "blue", "x": 0, "y": 0, "w": 200, "h": 200, "frameId": "f-2", "drawnBy": "Mori", "owner": "志明" }
+  ],
+  "connectors": [
+    { "id": "k-1", "from": "c-13", "to": "c-14" },
+    { "id": "k-2", "from": "c-14", "to": "c-15" },
+    { "id": "k-3", "from": "c-15", "to": "c-16" },
+    { "id": "k-4", "from": "c-16", "to": "c-17" },
+    { "id": "k-5", "from": "c-17", "to": "c-18" },
+    { "id": "k-6", "from": "c-18", "to": "c-19" }
+  ],
+  "transcript": []
+}

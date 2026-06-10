@@ -15,6 +15,9 @@ type Sticky = {
 	drawnBy?: string
 	owner?: string
 	tags?: string[]
+	frameId?: string // 屬於哪張圖框;無 = 自由卡
+	note?: boolean // 備註卡:自動排列與 AI 都不動它
+	type?: string // yjs 物件種別(sticky)
 }
 type Connector = { id: string; from: string; to: string }
 
@@ -72,6 +75,15 @@ const WB_TYPES: { key: string; label: string; blurb: string }[] = [
 	{ key: 'gantt', label: '甘特圖 / 排程', blurb: '任務排程,列=負責人,左→右時間' },
 ]
 const typeLabel = (k: string) => WB_TYPES.find((t) => t.key === k)?.label || '白板'
+// 互動導覽步驟:sel 選不到的步驟會自動略過(例如手機版沒有桌面匯出鈕)
+const TOUR_STEPS: { sel: string; title: string; body: string }[] = [
+	{ sel: '[data-tour="record"]', title: '用講的就好', body: '按這顆開始會議記錄:正常講話,停頓一下,AI 就把那段重點整理成便利貼上板。錄音中也能直接下指令,像「幫我排一下」「把這張指給小明」。' },
+	{ sel: '[data-tour="paste"]', title: '已經有逐字稿?', body: '這個面板裡可以展開「貼現成的逐字稿」,貼上後丟給 AI,一樣整理成整張板。' },
+	{ sel: '.toolstrip', title: '手動工具列', body: '便利貼、備註、開新圖、連線、排列、復原都在這;雙擊白板空白處也能直接新增便利貼。' },
+	{ sel: '[data-tour="share"]', title: '拉人一起', body: '分享 / QR:同事掃 QR 或輸入房號就進來,大家即時一起編輯,完全零安裝。' },
+	{ sel: '[data-tour="export"]', title: '會後收尾', body: '匯出:AI 依板型寫一頁白板摘要,或輸出 Markdown / PNG / 可完整還原的畫板存檔。' },
+	{ sel: '[data-tour="help"]', title: '隨時回得來', body: '之後想重看說明、重新跑導覽、或載入範例庫,都從這顆按鈕。祝開會愉快。' },
+]
 // hierarchical types use orthogonal "axis" connectors (elbow), routed by direction
 const WB_TREE_DIR: Record<string, 'TB' | 'LR'> = { orgchart: 'TB', architecture: 'TB', flow: 'LR', timeline: 'LR' }
 // elbow polyline from rect a -> rect b. TB routes via a shared horizontal mid-line
@@ -227,6 +239,11 @@ export default function App() {
 	const [roomList, setRoomList] = useState<{ id: string; shapes: number; online: number }[]>([])
 	const [panelOpen, setPanelOpen] = useState(window.innerWidth >= 700) // collapse agent panel on small screens
 	const [guide, setGuide] = useState(() => !localStorage.getItem('wb-seen-guide')) // first-run onboarding
+	// 範例庫:persona 範例板(client/public/examples/*.json),載入即還原成完整示範畫板
+	const [examplesOpen, setExamplesOpen] = useState(false)
+	const [exampleIndex, setExampleIndex] = useState<any[]>([])
+	// 互動導覽:spotlight 逐步指向真實按鈕;-1 = 未啟動
+	const [tourStep, setTourStep] = useState(-1)
 	const [boardTypeKey, setBoardTypeKey] = useState('meeting') // synced board type
 	const [boardTopic, setBoardTopic] = useState('')
 	const [frames, setFrames] = useState<any[]>([]) // diagrams on the canvas
@@ -516,6 +533,21 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 			a.click()
 			setTimeout(() => URL.revokeObjectURL(a.href), 1000)
 		}
+		// 把一份 mori-canvas/v1 畫板資料整批寫進共享 doc(匯入還原與載入範例共用)
+		function applyBoardData(data: any) {
+			tx(() => {
+				for (const k of [...yShapes.keys()]) yShapes.delete(k)
+				for (const k of [...yConnectors.keys()]) yConnectors.delete(k)
+				for (const k of [...yFrames.keys()]) yFrames.delete(k)
+				if (yTranscript.length) yTranscript.delete(0, yTranscript.length)
+				for (const f of data.frames || []) if (f?.id) yFrames.set(f.id, f)
+				for (const s of data.shapes || []) if (s?.id) yShapes.set(s.id, s)
+				for (const c of data.connectors || []) if (c?.id) yConnectors.set(c.id, c)
+				if (Array.isArray(data.transcript) && data.transcript.length) yTranscript.push(data.transcript)
+				if (data.meta?.type) yMeta.set('type', data.meta.type)
+				if (data.meta?.topic != null) yMeta.set('topic', String(data.meta.topic))
+			})
+		}
 		async function importBoard(file: File) {
 			let data: any
 			try {
@@ -529,20 +561,30 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 				return
 			}
 			if (yShapes.size > 0 && !window.confirm('匯入會覆蓋目前畫板的全部內容,還原成這個檔案。確定?')) return
-			tx(() => {
-				for (const k of [...yShapes.keys()]) yShapes.delete(k)
-				for (const k of [...yConnectors.keys()]) yConnectors.delete(k)
-				for (const k of [...yFrames.keys()]) yFrames.delete(k)
-				if (yTranscript.length) yTranscript.delete(0, yTranscript.length)
-				for (const f of data.frames || []) if (f?.id) yFrames.set(f.id, f)
-				for (const s of data.shapes || []) if (s?.id) yShapes.set(s.id, s)
-				for (const c of data.connectors || []) if (c?.id) yConnectors.set(c.id, c)
-				if (Array.isArray(data.transcript) && data.transcript.length) yTranscript.push(data.transcript)
-				if (data.meta?.type) yMeta.set('type', data.meta.type)
-				if (data.meta?.topic != null) yMeta.set('topic', String(data.meta.topic))
-			})
+			applyBoardData(data)
 			setBusy(`已還原畫板:${data.shapes.length} 張卡、${(data.frames || []).length} 張圖`)
 			setExportOpen(false)
+		}
+		// 範例庫:索引懶載入 + 載入單一範例(套資料後叫 server 依板型排版)
+		async function openExamples() {
+			setExamplesOpen(true)
+			if (!exampleIndex.length) {
+				const d = await fetch('examples/index.json').then((r) => r.json()).catch(() => null)
+				if (d?.examples) setExampleIndex(d.examples)
+			}
+		}
+		async function loadExample(id: string) {
+			const data = await fetch(`examples/${id}.json`).then((r) => r.json()).catch(() => null)
+			if (!data || !Array.isArray(data.shapes)) {
+				setBusy('範例載入失敗')
+				return
+			}
+			if (yShapes.size > 0 && !window.confirm('載入範例會覆蓋目前畫板的全部內容。確定?')) return
+			applyBoardData(data)
+			await fetch(`${SYNC_HTTP}/api/rooms/${encodeURIComponent(room)}/tidy`, { method: 'POST' }).catch(() => null)
+			setExamplesOpen(false)
+			setGuide(false)
+			setBusy(`已載入範例:${data.shapes.length} 張卡、${(data.frames || []).length} 張圖`)
 		}
 		function pickAndImportBoard() {
 			const inp = document.createElement('input')
@@ -1181,11 +1223,28 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 								</div>
 							</div>
 						))}
+						<div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
+							<button style={{ flex: 1, padding: '9px' }} onClick={() => openExamples()}>
+								看範例庫
+							</button>
+							<button
+								style={{ flex: 1, padding: '9px' }}
+								onClick={() => {
+									localStorage.setItem('wb-seen-guide', '1')
+									setGuide(false)
+									setTourStep(0)
+								}}
+							>
+								跑一次導覽
+							</button>
+						</div>
 						<button
-							className="btn-accent" style={{ width: '100%', marginTop: 6, padding: '11px', fontSize: 15, fontWeight: 600 }}
+							className="btn-accent" style={{ width: '100%', marginTop: 8, padding: '11px', fontSize: 15, fontWeight: 600 }}
 							onClick={() => {
+								const first = !localStorage.getItem('wb-seen-guide')
 								localStorage.setItem('wb-seen-guide', '1')
 								setGuide(false)
+								if (first && !localStorage.getItem('wb-tour-done')) setTourStep(0)
 							}}
 						>
 							開始使用
@@ -1193,6 +1252,116 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 					</div>
 				</div>
 			)}
+
+			{/* 範例庫:persona 範例板,載入看成品、照著講法示範自己講一遍 */}
+			{examplesOpen && (
+				<div
+					style={{ position: 'fixed', inset: 0, zIndex: 4100, background: 'rgba(28,26,23,0.5)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
+					onClick={() => setExamplesOpen(false)}
+				>
+					<div
+						className="glass modal-in"
+						style={{ background: 'var(--surface)', width: 'min(560px, 94vw)', maxHeight: '86vh', overflowY: 'auto', padding: '24px 22px 18px', borderRadius: 20 }}
+						onClick={(e) => e.stopPropagation()}
+					>
+						<div className="code" style={{ fontSize: 24, color: 'var(--ink)' }}>範例庫</div>
+						<div style={{ color: 'var(--ink-soft)', fontSize: 13, margin: '2px 0 14px' }}>
+							載入一份完整範例,看 AI 整理出來長什麼樣;展開「講法示範」可以照著講一遍,長出自己的板。
+						</div>
+						{!exampleIndex.length && <div className="muted" style={{ fontSize: 13 }}>載入範例清單中…</div>}
+						{exampleIndex.map((ex: any) => (
+							<div key={ex.id} style={{ border: '1px solid var(--line)', borderRadius: 14, padding: '12px 14px', marginBottom: 10 }}>
+								<div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+									<div style={{ flex: 1, minWidth: 0 }}>
+										<div style={{ fontWeight: 600, fontSize: 14 }}>
+											{ex.persona} · {ex.title}
+										</div>
+										<div style={{ fontSize: 12.5, color: 'var(--ink-soft)', margin: '3px 0 6px' }}>{ex.blurb}</div>
+										<div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+											{(ex.boards || []).map((b: string) => (
+												<span key={b} className="muted" style={{ fontSize: 11, border: '1px solid var(--line)', borderRadius: 999, padding: '2px 9px' }}>{b}</span>
+											))}
+										</div>
+									</div>
+									<button className="btn-accent" style={{ flex: '0 0 auto', padding: '7px 16px' }} onClick={() => loadExample(ex.id)}>
+										載入
+									</button>
+								</div>
+								{(ex.sampleUtterances || []).length > 0 && (
+									<details style={{ marginTop: 8 }}>
+										<summary style={{ cursor: 'pointer', fontSize: 12, color: 'var(--accent)' }}>講法示範:開會這樣講,AI 就會長出這張板</summary>
+										<ul style={{ margin: '6px 0 0', paddingLeft: 18, fontSize: 12.5, color: 'var(--ink-soft)', lineHeight: 1.7 }}>
+											{ex.sampleUtterances.map((u: string, i: number) => (
+												<li key={i}>「{u}」</li>
+											))}
+										</ul>
+									</details>
+								)}
+							</div>
+						))}
+						<div className="muted" style={{ fontSize: 11.5 }}>載入會覆蓋目前畫板(覆蓋前會先確認);想保留現況可先「匯出 → 畫板存檔」。</div>
+					</div>
+				</div>
+			)}
+
+			{/* 互動導覽:spotlight 逐步指向真實按鈕(選不到的步驟自動跳過,如手機版) */}
+			{tourStep >= 0 &&
+				(() => {
+					const steps = TOUR_STEPS.filter((s) => document.querySelector(s.sel))
+					if (!steps.length) return null
+					const i = Math.min(tourStep, steps.length - 1)
+					const el = document.querySelector(steps[i].sel)!
+					const r = el.getBoundingClientRect()
+					const pad = 6
+					const below = r.bottom + 170 < window.innerHeight
+					const tipTop = below ? r.bottom + pad + 12 : undefined
+					const tipBottom = below ? undefined : window.innerHeight - r.top + pad + 12
+					const tipLeft = Math.max(10, Math.min(r.left, window.innerWidth - 330))
+					const done = () => {
+						localStorage.setItem('wb-tour-done', '1')
+						setTourStep(-1)
+					}
+					return (
+						<div style={{ position: 'fixed', inset: 0, zIndex: 4200 }} onClick={done}>
+							<div
+								style={{
+									position: 'fixed',
+									left: r.left - pad,
+									top: r.top - pad,
+									width: r.width + pad * 2,
+									height: r.height + pad * 2,
+									borderRadius: 14,
+									border: '2px solid var(--accent)',
+									boxShadow: '0 0 0 9999px rgba(28,26,23,0.55)',
+									pointerEvents: 'none',
+								}}
+							/>
+							<div
+								className="glass modal-in"
+								style={{ position: 'fixed', left: tipLeft, top: tipTop, bottom: tipBottom, zIndex: 4201, background: 'var(--surface)', width: 'min(320px, calc(100vw - 20px))', padding: '14px 16px', borderRadius: 14 }}
+								onClick={(e) => e.stopPropagation()}
+							>
+								<div style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>
+									{steps[i].title}
+									<span className="muted" style={{ fontWeight: 400, fontSize: 11.5, marginLeft: 8 }}>{i + 1} / {steps.length}</span>
+								</div>
+								<div style={{ fontSize: 13, color: 'var(--ink-soft)', lineHeight: 1.6 }}>{steps[i].body}</div>
+								<div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+									<button style={{ padding: '6px 12px', fontSize: 12.5 }} onClick={done}>跳過</button>
+									<span style={{ flex: 1 }} />
+									{i > 0 && (
+										<button style={{ padding: '6px 12px', fontSize: 12.5 }} onClick={() => setTourStep(i - 1)}>上一步</button>
+									)}
+									{i < steps.length - 1 ? (
+										<button className="btn-accent" style={{ padding: '6px 14px', fontSize: 12.5 }} onClick={() => setTourStep(i + 1)}>下一步</button>
+									) : (
+										<button className="btn-accent" style={{ padding: '6px 14px', fontSize: 12.5 }} onClick={done}>完成</button>
+									)}
+								</div>
+							</div>
+						</div>
+					)
+				})()}
 			<Stage
 				ref={stageRef}
 				width={size.w}
@@ -1501,6 +1670,9 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 					<div style={{ fontSize: 13, color: 'var(--ink-soft)', opacity: 0.75 }}>
 						或雙擊空白新增便利貼 · 右上「分享 / QR」拉人進來
 					</div>
+					<button className="btn-soft" style={{ pointerEvents: 'auto', marginTop: 6, padding: '8px 18px', fontSize: 13 }} onClick={() => openExamples()}>
+						不知道從哪開始?載入一份範例看看
+					</button>
 				</div>
 			)}
 
@@ -1586,7 +1758,7 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 				<>
 					<div className="glass float-in" style={{ position: 'fixed', top: 'calc(8px + env(safe-area-inset-top, 0px))', left: 'calc(8px + env(safe-area-inset-left, 0px))', right: 'calc(8px + env(safe-area-inset-right, 0px))', zIndex: 1000, display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', fontSize: 13 }}>
 						<span className="code" style={{ fontSize: 17, color: 'var(--accent)' }}>{room}</span>
-						<button className="btn-accent" style={{ padding: '5px 11px' }} onClick={() => setShareOpen(true)}>分享</button>
+						<button className="btn-accent" style={{ padding: '5px 11px' }} data-tour="share" onClick={() => setShareOpen(true)}>分享</button>
 						<span style={{ flex: 1 }} />
 						<span className="muted" style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{status === 'synced' ? '已連線' : status}·{shapes.length}</span>
 						<button style={btn} title="更多" onClick={() => setMenuOpen((v) => !v)}>⋯</button>
@@ -1600,6 +1772,7 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 							<button onClick={() => setSettingsOpen(true)}>⚙ 設定</button>
 							<button onClick={() => toggleTheme()}>{theme === 'dark' ? '☀ 亮色主題' : '☾ 暗色主題'}</button>
 							<button onClick={() => setView({ x: 0, y: 0, scale: 1 })}>回正視圖</button>
+							<button onClick={() => openExamples()}>範例庫</button>
 							<button onClick={() => setGuide(true)}>? 使用說明</button>
 							<button className="btn-danger" onClick={() => { if (window.confirm('清空整個房間給所有人?')) clearAll() }}>清空房間</button>
 						</div>
@@ -1609,7 +1782,7 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 				<div className="glass float-in" style={bar}>
 					<span className="muted" style={{ fontSize: 12 }}>房號</span>
 					<span className="code" style={{ fontSize: 19, color: 'var(--accent)', marginRight: 2 }}>{room}</span>
-					<button title="分享這間會議室:QR、房號、邀請連結" className="btn-accent" onClick={() => setShareOpen(true)}>分享 / QR</button>
+					<button title="分享這間會議室:QR、房號、邀請連結" className="btn-accent" data-tour="share" onClick={() => setShareOpen(true)}>分享 / QR</button>
 					<span className="muted" style={{ fontSize: 12 }} title={status === 'synced' ? '已即時連線' : status}>
 						{status === 'synced' ? '已連線' : status} · {shapes.length} 張
 					</span>
@@ -1633,12 +1806,13 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 			{/* app / view (top-right) — desktop only; on mobile these live in the ⋯ menu */}
 			{!mobile && (
 				<div className="glass float-in" style={appbar}>
-					<button title="匯出 / 輸出:白板摘要、Markdown、PNG、畫板存檔(可還原)" className="btn-soft" onClick={() => setExportOpen(true)}>匯出</button>
+					<button title="匯出 / 輸出:白板摘要、Markdown、PNG、畫板存檔(可還原)" className="btn-soft" data-tour="export" onClick={() => setExportOpen(true)}>匯出</button>
 					<button style={btn} title="設定:AI 雲端/本機、排列間距、自動重排" onClick={() => setSettingsOpen(true)}>⚙</button>
 					<button style={btn} title={theme === 'dark' ? '切換亮色主題' : '切換暗色主題'} onClick={toggleTheme}>{theme === 'dark' ? '☀' : '☾'}</button>
 					<button style={btn} title="視圖回到原點與原始縮放" onClick={() => setView({ x: 0, y: 0, scale: 1 })}>回正</button>
 					<button className="btn-danger" title="清空整個房間(會清掉所有人的板,請小心)" onClick={() => { if (window.confirm('清空整個房間給所有人?')) clearAll() }}>清空</button>
-					<button style={btn} title="使用說明 / 新手引導" onClick={() => setGuide(true)}>?</button>
+					<button style={btn} title="範例庫:載入完整示範畫板 + 講法示範" onClick={() => openExamples()}>範例</button>
+					<button style={btn} title="使用說明 / 新手引導" data-tour="help" onClick={() => setGuide(true)}>?</button>
 				</div>
 			)}
 
@@ -1976,7 +2150,7 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 				)}
 
 				{/* agent / voice panel (collapsible; record stays visible) */}
-			<div className="glass float-in" style={{ ...panel, width: mobile ? 'min(86vw, 320px)' : 320, left: mobile ? 8 : 14 }}>
+			<div className="glass float-in" data-tour="paste" style={{ ...panel, width: mobile ? 'min(86vw, 320px)' : 320, left: mobile ? 8 : 14 }}>
 				<div
 					onClick={() => setPanelOpen((o) => !o)}
 					style={{ fontWeight: 600, cursor: 'pointer', userSelect: 'none' }}
@@ -1986,6 +2160,7 @@ ul{margin:6px 0 12px;padding-left:22px}li{margin:3px 0}p{margin:8px 0}
 				{/* voice = the main way to get content onto the board */}
 				<button
 					className={`btn-rec${meeting ? ' live' : ''}`}
+					data-tour="record"
 						style={{ width: '100%', marginTop: 8, fontSize: 15, padding: '13px', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
 					title="連續錄音:邊講邊整理,停頓會自動斷句上板;再按一次停止"
 					onClick={() => (meeting ? stopMeeting() : startMeeting())}

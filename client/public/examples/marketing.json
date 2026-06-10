@@ -1,0 +1,38 @@
+{
+  "format": "mori-canvas/v1",
+  "meta": { "type": "swot", "topic": "手沖咖啡訂閱盒上市" },
+  "frames": [
+    { "id": "f-1", "title": "新品上市 SWOT", "type": "swot", "x": 80, "y": 80, "w": 480, "h": 320 },
+    { "id": "f-2", "title": "上市時程", "type": "timeline", "x": 80, "y": 80, "w": 480, "h": 320 }
+  ],
+  "shapes": [
+    { "id": "c-1", "type": "sticky", "text": "IG 私域流量強", "color": "green", "x": 0, "y": 0, "w": 200, "h": 200, "frameId": "f-1", "drawnBy": "Mori" },
+    { "id": "c-2", "type": "sticky", "text": "自家烘豆成本低", "color": "green", "x": 0, "y": 0, "w": 200, "h": 200, "frameId": "f-1", "drawnBy": "Mori" },
+    { "id": "c-3", "type": "sticky", "text": "創辦人咖啡師背景", "color": "green", "x": 0, "y": 0, "w": 200, "h": 200, "frameId": "f-1", "drawnBy": "Mori" },
+    { "id": "c-4", "type": "sticky", "text": "訂閱金流未串接", "color": "yellow", "x": 0, "y": 0, "w": 200, "h": 200, "frameId": "f-1", "drawnBy": "Mori" },
+    { "id": "c-5", "type": "sticky", "text": "人手只有三人", "color": "yellow", "x": 0, "y": 0, "w": 200, "h": 200, "frameId": "f-1", "drawnBy": "Mori" },
+    { "id": "c-6", "type": "sticky", "text": "包裝設計未定稿", "color": "yellow", "x": 0, "y": 0, "w": 200, "h": 200, "frameId": "f-1", "drawnBy": "Mori" },
+    { "id": "c-7", "type": "sticky", "text": "宅家手沖風潮升溫", "color": "blue", "x": 0, "y": 0, "w": 200, "h": 200, "frameId": "f-1", "drawnBy": "Mori" },
+    { "id": "c-8", "type": "sticky", "text": "企業禮盒詢問多", "color": "blue", "x": 0, "y": 0, "w": 200, "h": 200, "frameId": "f-1", "drawnBy": "Mori" },
+    { "id": "c-9", "type": "sticky", "text": "podcast 合作邀約", "color": "blue", "x": 0, "y": 0, "w": 200, "h": 200, "frameId": "f-1", "drawnBy": "Mori" },
+    { "id": "c-10", "type": "sticky", "text": "超商咖啡訂閱競品", "color": "red", "x": 0, "y": 0, "w": 200, "h": 200, "frameId": "f-1", "drawnBy": "Mori" },
+    { "id": "c-11", "type": "sticky", "text": "豆價匯率波動", "color": "red", "x": 0, "y": 0, "w": 200, "h": 200, "frameId": "f-1", "drawnBy": "Mori" },
+    { "id": "c-12", "type": "sticky", "text": "演算法觸及下滑", "color": "red", "x": 0, "y": 0, "w": 200, "h": 200, "frameId": "f-1", "drawnBy": "Mori" },
+    { "id": "c-13", "type": "sticky", "text": "豆單與烘焙定案", "color": "green", "x": 0, "y": 0, "w": 200, "h": 200, "frameId": "f-2", "drawnBy": "Mori" },
+    { "id": "c-14", "type": "sticky", "text": "試喝盒公測", "color": "green", "x": 0, "y": 0, "w": 200, "h": 200, "frameId": "f-2", "drawnBy": "Mori" },
+    { "id": "c-15", "type": "sticky", "text": "訂閱頁面開發", "color": "yellow", "x": 0, "y": 0, "w": 200, "h": 200, "frameId": "f-2", "drawnBy": "Mori" },
+    { "id": "c-16", "type": "sticky", "text": "包裝印刷延誤", "color": "red", "x": 0, "y": 0, "w": 200, "h": 200, "frameId": "f-2", "drawnBy": "Mori" },
+    { "id": "c-17", "type": "sticky", "text": "KOL 開箱合作", "color": "blue", "x": 0, "y": 0, "w": 200, "h": 200, "frameId": "f-2", "drawnBy": "Mori" },
+    { "id": "c-18", "type": "sticky", "text": "正式上市開賣", "color": "blue", "x": 0, "y": 0, "w": 200, "h": 200, "frameId": "f-2", "drawnBy": "Mori" },
+    { "id": "c-19", "type": "sticky", "text": "首月留存檢討", "color": "blue", "x": 0, "y": 0, "w": 200, "h": 200, "frameId": "f-2", "drawnBy": "Mori" }
+  ],
+  "connectors": [
+    { "id": "k-1", "from": "c-13", "to": "c-14" },
+    { "id": "k-2", "from": "c-14", "to": "c-15" },
+    { "id": "k-3", "from": "c-15", "to": "c-16" },
+    { "id": "k-4", "from": "c-16", "to": "c-17" },
+    { "id": "k-5", "from": "c-17", "to": "c-18" },
+    { "id": "k-6", "from": "c-18", "to": "c-19" }
+  ],
+  "transcript": []
+}
