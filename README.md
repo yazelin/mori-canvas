@@ -232,6 +232,19 @@ curl -X POST localhost:1334/api/visualize -H 'Content-Type: application/json' \
 
 ---
 
+## 介面語言 / Language
+
+UI 支援 **繁體中文(zh-TW)與 English** 兩種語言:
+
+- **自動偵測**:第一次開啟依瀏覽器語言(`navigator.language` 是 `zh*` → 繁中,其餘 → English)。
+- **手動切換**:⚙ 設定 → 「介面語言 / Language」,即時生效並記住選擇(`localStorage` 的 `wb-lang`)。
+- **AI 輸出跟著語言走**:client 對每個 AI 請求帶 `X-Lang: zh-TW|en` header(`/api/summary` 由 `?lang=` 帶)。`en` 時 server 在 system prompt 尾端附加英文輸出指令、並跳過 OpenCC 繁化 —— 英文房講英文就長出英文卡片與英文摘要;沒帶 header 的請求行為與舊版完全相同(zh-TW 預設,含簡轉繁硬轉)。headless 呼叫 `/api/visualize` 也可在 body 帶 `"lang": "en"`。
+- **範例庫是內容不是 UI**:內建範例板維持繁中(英文介面會在範例庫加註說明);專有名詞(Mori Canvas、Groq、Ollama、whisper…)兩種語言都不翻譯。
+
+UI ships in **Traditional Chinese (zh-TW) and English** — auto-detected from the browser, switchable in ⚙ Settings (persisted). AI output (cards, summaries) follows the UI language via an `X-Lang` header; requests without the header keep the original zh-TW behaviour.
+
+---
+
 ## 社群範本
 
 範例庫(app 內「?」→ 範例庫)除了內建五個 persona 範例,也收社群投稿的範本(`client/public/templates/`)。每份範本都有一條**深連結**可以分享:`?room=<新房號>&board=<範本id>` —— 對方點開,新房間自動長出整張板(房間已有內容則略過,不會蓋掉);範例庫裡每份範本旁也有「複製分享連結」按鈕。想投自己的板,看 [templates/README.md](client/public/templates/README.md);回報問題與 PR 規範見 [CONTRIBUTING.md](CONTRIBUTING.md)。
@@ -253,6 +266,7 @@ curl -X POST localhost:1334/api/visualize -H 'Content-Type: application/json' \
 - **備註**:任何圖表都能貼的隨手註記(自動排列與 AI 都不動它)。
 - **板型 × 自動排版(保證不互疊)**:10 種板型(會議/組織/流程/架構/心智圖/看板/SWOT/時間軸/魚骨/甘特),6 種排版,frame-aware。樹狀圖用 tidy-tree(父節點置中於子樹上方);心智圖環半徑隨卡數撐大;SWOT 象限排網格;每次排版後跑碰撞防護;「排好」時 frame 會整批重新排位(列式、超寬換行),**卡片跟 frame 都不會互相疊住**。
 - **Bring Your Own AI**:訪客在設定填自己的 OpenAI 相容 base/key/model(OpenAI/Gemini/Azure/Groq/Ollama),用自己額度、不耗主機。
+- **雙語介面(zh-TW / English)**:react-i18next,依瀏覽器語言自動偵測、設定頁可切、AI 輸出語言跟著走(`X-Lang` header);詳見上方「介面語言 / Language」。
 - **進場報名 + 深淺主題**:進來先輸入名字(不再全是訪客);☾/☀ 切換亮/暗色(暖紙 / 森林夜)。
 - **房間 + 分享**:進場名字 gate、自動房號、QR、輸入房號加入、房間清單、結束此房。
 - **持久化**:每房 `.data/<room>.bin`,重啟自動還原。
