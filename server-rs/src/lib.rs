@@ -418,27 +418,30 @@ fn llm_opts() -> impl Filter<Extract = (llm::LlmOpts,), Error = warp::Rejection>
         )
 }
 
-fn room_title(default_type: &str, topic: &str, frames: &[Value]) -> String {
+fn room_title(default_type: &str, topic: &str, frames: &[Value], lang: llm::Lang) -> String {
+    let board_word = if lang == llm::Lang::En { "Board" } else { "board" };
     if !frames.is_empty() {
         let label = if frames.len() == 1 {
             let typ = frames[0]
                 .get("type")
                 .and_then(|v| v.as_str())
                 .unwrap_or(default_type);
-            board_types::board_type(typ).label
+            board_types::label_lang(typ, lang)
+        } else if lang == llm::Lang::En {
+            "Multi-diagram board"
         } else {
             "多圖白板"
         };
         return format!(
             "{}:{}",
             label,
-            if topic.is_empty() { "board" } else { topic }
+            if topic.is_empty() { board_word } else { topic }
         );
     }
     format!(
         "{}:{}",
-        board_types::board_type(default_type).label,
-        if topic.is_empty() { "board" } else { topic }
+        board_types::label_lang(default_type, lang),
+        if topic.is_empty() { board_word } else { topic }
     )
 }
 
@@ -486,6 +489,7 @@ fn board_section_markdown(
     conns: &[Value],
     shapes: &[Value],
     hlevel: &str,
+    lang: llm::Lang,
 ) -> String {
     let bt = board_types::board_type(type_key);
     let order = ["blue", "green", "yellow", "red"];
@@ -493,8 +497,8 @@ fn board_section_markdown(
         std::collections::HashMap::new();
     for s in cards {
         let color = s.get("color").and_then(|v| v.as_str()).unwrap_or("yellow");
-        let cat = board_types::color_label(bt, color)
-            .unwrap_or("其他")
+        let cat = board_types::color_label_lang(bt, color, lang)
+            .unwrap_or_else(|| board_types::other_label(lang))
             .to_string();
         by_cat.entry(cat).or_default().push(format!(
             "- {}{}{}",
@@ -506,10 +510,10 @@ fn board_section_markdown(
     let mut out = format!("{} {}\n", hlevel, heading);
     let mut cats: Vec<String> = order
         .iter()
-        .filter_map(|c| board_types::color_label(bt, c))
+        .filter_map(|c| board_types::color_label_lang(bt, c, lang))
         .map(|s| s.to_string())
         .collect();
-    cats.push("其他".to_string());
+    cats.push(board_types::other_label(lang).to_string());
     for cat in cats {
         if let Some(items) = by_cat.get(&cat) {
             if !items.is_empty() {
@@ -540,7 +544,11 @@ fn board_section_markdown(
         })
         .collect();
     if !edges.is_empty() {
-        out += &format!("\n**{}**\n{}\n", bt.edge_label, edges.join("\n"));
+        out += &format!(
+            "\n**{}**\n{}\n",
+            board_types::edge_label_lang(bt, lang),
+            edges.join("\n")
+        );
     }
     out + "\n"
 }
@@ -551,12 +559,13 @@ fn export_markdown_from_parts(
     frames: &[Value],
     mtype: &str,
     topic: &str,
+    lang: llm::Lang,
 ) -> String {
     let section = |heading: &str, type_key: &str, cards: &[&Value], hlevel: &str| -> String {
-        board_section_markdown(heading, type_key, cards, conns, shapes, hlevel)
+        board_section_markdown(heading, type_key, cards, conns, shapes, hlevel, lang)
     };
     if !frames.is_empty() {
-        let mut md = format!("# {}\n\n", room_title(mtype, topic, frames));
+        let mut md = format!("# {}\n\n", room_title(mtype, topic, frames, lang));
         for f in frames {
             let fid = f.get("id").and_then(|v| v.as_str()).unwrap_or("");
             let ftype = f.get("type").and_then(|v| v.as_str()).unwrap_or("meeting");
@@ -566,7 +575,7 @@ fn export_markdown_from_parts(
                 .filter(|s| s.get("frameId").and_then(|v| v.as_str()) == Some(fid))
                 .collect();
             md += &section(
-                &format!("{}:{}", board_types::board_type(ftype).label, ftitle),
+                &format!("{}:{}", board_types::label_lang(ftype, lang), ftitle),
                 ftype,
                 &fcards,
                 "##",
@@ -578,7 +587,7 @@ fn export_markdown_from_parts(
         section(
             &format!(
                 "{}:{}",
-                board_types::board_type(mtype).label,
+                board_types::label_lang(mtype, lang),
                 if topic.is_empty() { "board" } else { topic }
             ),
             mtype,
@@ -589,12 +598,12 @@ fn export_markdown_from_parts(
 }
 
 // frame-aware markdown export (port of /api/export)
-fn export_markdown(room: &sync::Room) -> String {
+fn export_markdown(room: &sync::Room, lang: llm::Lang) -> String {
     let shapes = store::read_map(room, "shapes");
     let conns = store::read_map(room, "connectors");
     let frames = store::frames_sorted(room);
     let (mtype, topic) = store::read_meta(room);
-    export_markdown_from_parts(&shapes, &conns, &frames, &mtype, &topic)
+    export_markdown_from_parts(&shapes, &conns, &frames, &mtype, &topic, lang)
 }
 
 fn board_type_reference(type_key: &str) -> String {
@@ -618,14 +627,14 @@ fn summary_board_input_from_parts(
     mtype: &str,
     topic: &str,
 ) -> (String, String) {
-    let title = room_title(mtype, topic, frames);
+    let title = room_title(mtype, topic, frames, llm::Lang::ZhTw);
     let mut refs: Vec<String> = Vec::new();
     let mut body = String::new();
     if frames.is_empty() {
         refs.push(board_type_reference(mtype));
         let cards: Vec<&Value> = shapes.iter().collect();
         body.push_str(&board_section_markdown(
-            &title, mtype, &cards, conns, shapes, "##",
+            &title, mtype, &cards, conns, shapes, "##", llm::Lang::ZhTw,
         ));
     } else {
         for f in frames {
@@ -648,6 +657,7 @@ fn summary_board_input_from_parts(
                 conns,
                 shapes,
                 "##",
+                llm::Lang::ZhTw,
             ));
         }
         let unframed: Vec<&Value> = shapes
@@ -666,6 +676,7 @@ fn summary_board_input_from_parts(
                 conns,
                 shapes,
                 "##",
+                llm::Lang::ZhTw,
             ));
         }
     }
@@ -708,6 +719,7 @@ async fn summary_markdown(
         &mtype,
         if topic.is_empty() { name } else { &topic },
         &frames,
+        llm::Lang::ZhTw,
     );
     // 摘要文件的固定框字(標題/空板/失敗)跟著請求語言;板型區段標題仍為 zh(deterministic 轉換)
     let (h_summary, msg_empty, msg_fail) = match llm.lang {
@@ -1037,10 +1049,13 @@ pub async fn serve(port: u16) {
     let r_export = rooms.clone();
     let export = warp::get()
         .and(warp::path!("api" / "export" / String))
+        .and(warp::query::<HashMap<String, String>>())
         .and(with(r_export))
-        .and_then(|name: String, rooms: sync::Rooms| async move {
+        .and_then(|name: String, q: HashMap<String, String>, rooms: sync::Rooms| async move {
+            // ?lang= 後備:這支會被 window.open 直接打開(帶不了 X-Lang header)
+            let lang = llm::Lang::parse(q.get("lang").map(|s| s.as_str()));
             let room = open_room(&rooms, &name).await?;
-            let md = export_markdown(&room);
+            let md = export_markdown(&room, lang);
             Ok::<_, warp::Rejection>(warp::reply::with_header(
                 md,
                 "Content-Type",
@@ -1199,7 +1214,7 @@ pub async fn serve(port: u16) {
                 };
                 if transcript.trim().is_empty() {
                     return Ok(warp::reply::json(
-                        &json!({ "ok": true, "stickies": 0, "connectors": 0, "added": [], "skipped": "整段都是語助詞" }),
+                        &json!({ "ok": true, "stickies": 0, "connectors": 0, "added": [], "skipped": if llm.lang == llm::Lang::En { "Only filler words" } else { "整段都是語助詞" } }),
                     ));
                 }
                 let _lk = room_lock(&name).await;
@@ -1286,7 +1301,7 @@ pub async fn serve(port: u16) {
                     cleanup::cleanup_transcript(&transcript, s.local_only, &llm).await;
                 if transcript.trim().is_empty() {
                     return Ok(warp::reply::json(
-                        &json!({ "ok": true, "transcript": "", "rawTranscript": raw_transcript, "stickies": 0, "skipped": "整段都是語助詞" }),
+                        &json!({ "ok": true, "transcript": "", "rawTranscript": raw_transcript, "stickies": 0, "skipped": if llm.lang == llm::Lang::En { "Only filler words" } else { "整段都是語助詞" } }),
                     ));
                 }
                 let by: String = q
@@ -1416,7 +1431,7 @@ pub async fn serve(port: u16) {
                 }
             }
             apply::tidy_board(&room, s.spacing);
-            let markdown = export_markdown(&room);
+            let markdown = export_markdown(&room, llm.lang);
             let summary = summary_markdown(&room, &name, s.local_only, &llm).await;
             let cards = store::read_map(&room, "shapes").iter().filter(|x| x.get("type").and_then(|v| v.as_str()) == Some("sticky")).count();
             let frames = store::frames_sorted(&room).len();
@@ -1677,13 +1692,23 @@ mod tests {
         let conns = vec![json!({"from":"ceo","to":"eng"})];
         let frames = vec![json!({"id":"f1","type":"orgchart","title":"團隊"})];
 
-        let md = export_markdown_from_parts(&shapes, &conns, &frames, "meeting", "組織");
+        let md = export_markdown_from_parts(&shapes, &conns, &frames, "meeting", "組織", llm::Lang::ZhTw);
 
         assert!(md.contains("**最高層**"));
         assert!(md.contains("**主管/部門**"));
         assert!(md.contains("**隸屬(上級 → 下屬)**"));
         assert!(!md.contains("**決議**"));
         assert!(!md.contains("**待辦**"));
+
+        // 同一張板用 en 匯出:區段標題、板型名、連線標題全英文,且不留中文
+        let md_en =
+            export_markdown_from_parts(&shapes, &conns, &frames, "meeting", "組織", llm::Lang::En);
+        assert!(md_en.contains("Org Chart"));
+        assert!(md_en.contains("**Top level**"));
+        assert!(md_en.contains("**Managers / Depts**"));
+        assert!(md_en.contains("**Reports to (manager -> report)**"));
+        assert!(!md_en.contains("最高層"));
+        assert!(!md_en.contains("隸屬"));
     }
 
     #[test]

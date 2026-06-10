@@ -5,7 +5,7 @@ use crate::agent::{
     plan_agent, AgentCommand, AgentResult, BoardPlan, ExistingCard, FrameInfo, FrameTarget,
     StickyPlan,
 };
-use crate::board_types::board_type;
+use crate::board_types::{self, board_type};
 use crate::layout;
 use crate::store::{self, rid};
 use crate::sync::Room;
@@ -258,7 +258,10 @@ pub fn run_command(
     existing: &[ExistingCard],
     cmd: &AgentCommand,
     spacing: f64,
+    lang: crate::llm::Lang,
 ) -> (String, Option<Value>) {
+    use crate::llm::Lang::En;
+    let en = lang == En;
     let patch = |id: &str, f: &dyn Fn(&mut Value)| {
         let doc = room.awareness.doc();
         let shapes = doc.get_or_insert_map("shapes");
@@ -272,10 +275,12 @@ pub fn run_command(
     match cmd {
         AgentCommand::Tidy => {
             tidy_board(room, spacing);
-            ("自動排列".into(), None)
+            (if en { "Arranged".into() } else { "自動排列".into() }, None)
         }
         AgentCommand::Filter { by, value } => {
-            let label = if by == "tag" {
+            let label = if en {
+                if by == "tag" { format!("Only #{}", value) } else { format!("Only {}", value) }
+            } else if by == "tag" {
                 format!("只看 #{}", value)
             } else {
                 format!("只看 {}", value)
@@ -285,23 +290,23 @@ pub fn run_command(
                 Some(json!({ "action": "filter", "by": by, "value": value })),
             )
         }
-        AgentCommand::ClearFilter => ("顯示全部".into(), Some(json!({ "action": "clearFilter" }))),
+        AgentCommand::ClearFilter => (if en { "Show all".into() } else { "顯示全部".into() }, Some(json!({ "action": "clearFilter" }))),
         AgentCommand::Assign { index, owner } => {
             if let Some(c) = existing.get(*index) {
                 patch(&c.id, &|v| v["owner"] = json!(owner));
-                (format!("指派「{}」給 {}", c.text, owner), None)
+                (if en { format!("Assigned \"{}\" to {}", c.text, owner) } else { format!("指派「{}」給 {}", c.text, owner) }, None)
             } else {
-                ("指派失敗".into(), None)
+                (if en { "Assign failed".into() } else { "指派失敗".into() }, None)
             }
         }
         AgentCommand::Recolor { index, kind } => {
             if let Some(c) = existing.get(*index) {
                 if let Some(color) = crate::agent::color_by_kind(kind) {
                     patch(&c.id, &|v| v["color"] = json!(color));
-                    return (format!("「{}」改色", c.text), None);
+                    return (if en { format!("Recolored \"{}\"", c.text) } else { format!("「{}」改色", c.text) }, None);
                 }
             }
-            ("改色失敗".into(), None)
+            (if en { "Recolor failed".into() } else { "改色失敗".into() }, None)
         }
         AgentCommand::Tag { index, tags } => {
             if let Some(c) = existing.get(*index) {
@@ -313,17 +318,17 @@ pub fn run_command(
                 }
                 merged.truncate(3);
                 patch(&c.id, &|v| v["tags"] = json!(merged));
-                (format!("「{}」加上 #{}", c.text, tags.join(" #")), None)
+                (if en { format!("Tagged \"{}\" #{}", c.text, tags.join(" #")) } else { format!("「{}」加上 #{}", c.text, tags.join(" #")) }, None)
             } else {
-                ("加標籤失敗".into(), None)
+                (if en { "Tag failed".into() } else { "加標籤失敗".into() }, None)
             }
         }
         AgentCommand::Edit { index, text } => {
             if let Some(c) = existing.get(*index) {
                 patch(&c.id, &|v| v["text"] = json!(text));
-                (format!("「{}」改寫為「{}」", c.text, text), None)
+                (if en { format!("Rewrote \"{}\" to \"{}\"", c.text, text) } else { format!("「{}」改寫為「{}」", c.text, text) }, None)
             } else {
-                ("改寫失敗".into(), None)
+                (if en { "Edit failed".into() } else { "改寫失敗".into() }, None)
             }
         }
         AgentCommand::Move { index, frame } => {
@@ -332,9 +337,9 @@ pub fn run_command(
                 let fid = f.id.clone();
                 patch(&c.id, &|v| v["frameId"] = json!(fid));
                 tidy_board(room, spacing);
-                (format!("「{}」移到「{}」", c.text, f.title), None)
+                (if en { format!("Moved \"{}\" to \"{}\"", c.text, f.title) } else { format!("「{}」移到「{}」", c.text, f.title) }, None)
             } else {
-                ("移動失敗".into(), None)
+                (if en { "Move failed".into() } else { "移動失敗".into() }, None)
             }
         }
         AgentCommand::Zones { titles } => {
@@ -342,7 +347,7 @@ pub fn run_command(
                 store::create_frame(room, "meeting", t);
             }
             (
-                format!("開了 {} 個區:{}", titles.len(), titles.join("、")),
+                if en { format!("Created {} zones: {}", titles.len(), titles.join(", ")) } else { format!("開了 {} 個區:{}", titles.len(), titles.join("、")) },
                 None,
             )
         }
@@ -358,9 +363,9 @@ pub fn run_command(
                     json_to_any(&json!({ "id": cid, "from": a.id, "to": b.id })),
                 );
                 drop(txn);
-                (format!("連起來:「{}」→「{}」", a.text, b.text), None)
+                (if en { format!("Connected \"{}\" -> \"{}\"", a.text, b.text) } else { format!("連起來:「{}」→「{}」", a.text, b.text) }, None)
             } else {
-                ("連線失敗".into(), None)
+                (if en { "Connect failed".into() } else { "連線失敗".into() }, None)
             }
         }
     }
@@ -435,7 +440,7 @@ pub async fn run_agent_turn(
     .await?;
     match result {
         AgentResult::Command(cmd) => {
-            let (label, view) = run_command(room, &existing, &cmd, spacing);
+            let (label, view) = run_command(room, &existing, &cmd, spacing, llm.lang);
             Ok(
                 json!({ "ok": true, "provider": provider, "intent": "command", "command": view, "commandLabel": label, "added": [], "stickies": 0, "connectors": 0 }),
             )
@@ -446,11 +451,12 @@ pub async fn run_agent_turn(
             let frame_id: String = match &plan.frame {
                 Some(FrameTarget::New { typ, title }) => {
                     let f = store::create_frame(room, typ, title);
-                    frame_label = format!(
-                        "開新圖:{}「{}」",
-                        board_type(typ).label,
-                        f.get("title").and_then(|v| v.as_str()).unwrap_or("")
-                    );
+                    let ftitle = f.get("title").and_then(|v| v.as_str()).unwrap_or("");
+                    frame_label = if llm.lang == crate::llm::Lang::En {
+                        format!("New diagram: {} \"{}\"", board_types::label_lang(typ, llm.lang), ftitle)
+                    } else {
+                        format!("開新圖:{}「{}」", board_type(typ).label, ftitle)
+                    };
                     f.get("id")
                         .and_then(|v| v.as_str())
                         .unwrap_or("")
@@ -470,7 +476,11 @@ pub async fn run_agent_turn(
                                 &topic
                             },
                         );
-                        frame_label = format!("開新圖:{}", board_type(&mtype).label);
+                        frame_label = if llm.lang == crate::llm::Lang::En {
+                            format!("New diagram: {}", board_types::label_lang(&mtype, llm.lang))
+                        } else {
+                            format!("開新圖:{}", board_type(&mtype).label)
+                        };
                         f.get("id")
                             .and_then(|v| v.as_str())
                             .unwrap_or("")

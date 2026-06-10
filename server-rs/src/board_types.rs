@@ -108,6 +108,77 @@ pub fn color_label(bt: &BoardType, color: &str) -> Option<&'static str> {
     bt.colors.iter().find(|(c, _)| *c == color).map(|(_, l)| *l)
 }
 
+// --- 匯出 / 摘要用的英文對照(X-Lang: en) ---
+// 只翻「會被匯出看到」的字:板型名 label、edge_label、各 color 的語意。
+// AI prompt 用的 hint/blurb 不在此列(輸出語言由 EN_OUTPUT_DIRECTIVE 控)。
+use crate::llm::Lang;
+
+/// 板型名的英文。
+pub fn label_lang(key: &str, lang: Lang) -> &'static str {
+    if lang == Lang::ZhTw {
+        return board_type(key).label;
+    }
+    match key {
+        "meeting" => "Meeting Board",
+        "orgchart" => "Org Chart",
+        "flow" => "Flowchart",
+        "architecture" => "System Architecture",
+        "mindmap" => "Mind Map",
+        "kanban" => "Kanban",
+        "swot" => "SWOT / Matrix",
+        "timeline" => "Timeline",
+        "fishbone" => "Fishbone",
+        "gantt" => "Gantt / Schedule",
+        _ => "Board",
+    }
+}
+
+/// 連線區段標題的英文(對應 edge_label)。
+pub fn edge_label_lang(bt: &BoardType, lang: Lang) -> &'static str {
+    if lang == Lang::ZhTw {
+        return bt.edge_label;
+    }
+    match bt.key {
+        "orgchart" => "Reports to (manager -> report)",
+        "flow" => "Flow (before -> after)",
+        "architecture" => "Depends on (caller -> callee)",
+        "mindmap" => "Branches (parent -> child)",
+        "kanban" | "gantt" => "Depends on (first -> next)",
+        "timeline" => "Timeline (earlier -> later)",
+        "fishbone" => "Cause and effect (cause -> effect)",
+        _ => "Related",
+    }
+}
+
+/// color 語意的英文。位置與 zh 的 bt.colors 一一對應。
+pub fn color_label_lang(bt: &BoardType, color: &str, lang: Lang) -> Option<&'static str> {
+    if lang == Lang::ZhTw {
+        return color_label(bt, color);
+    }
+    let en: &[(&str, &str)] = match bt.key {
+        "meeting" => &[("yellow", "Topics"), ("green", "To-dos"), ("blue", "Decisions"), ("red", "Risks")],
+        "orgchart" => &[("blue", "Top level"), ("green", "Managers / Depts"), ("yellow", "Staff roles"), ("red", "External / Part-time")],
+        "flow" => &[("green", "Start"), ("yellow", "Step"), ("blue", "Decision / Branch"), ("red", "End / Exception")],
+        "architecture" => &[("blue", "Frontend / UI"), ("green", "Backend / Service"), ("yellow", "Data / Storage"), ("red", "External system")],
+        "mindmap" => &[("blue", "Center"), ("green", "Main branch"), ("yellow", "Branch"), ("red", "Detail")],
+        "kanban" => &[("red", "To do"), ("yellow", "In progress"), ("green", "Done"), ("blue", "Blocked / On hold")],
+        "swot" => &[("green", "Strengths (S)"), ("yellow", "Weaknesses (W)"), ("blue", "Opportunities (O)"), ("red", "Threats (T)")],
+        "timeline" => &[("green", "Done"), ("yellow", "In progress"), ("blue", "Planned"), ("red", "Delayed / Risk")],
+        "fishbone" => &[("blue", "Problem / Effect"), ("green", "Main cause"), ("yellow", "Sub-cause"), ("red", "Key factor")],
+        "gantt" => &[("green", "Done"), ("yellow", "In progress"), ("blue", "Not started"), ("red", "Delayed / Stuck")],
+        _ => return None,
+    };
+    en.iter().find(|(c, _)| *c == color).map(|(_, l)| *l)
+}
+
+/// 「其他」分類標題(未匹配到 color 的卡)。
+pub fn other_label(lang: Lang) -> &'static str {
+    match lang {
+        Lang::ZhTw => "其他",
+        Lang::En => "Other",
+    }
+}
+
 /// compact reference for all types — fed to the agent so it can pick + interpret any frame
 pub fn types_brief() -> String {
     BOARD_TYPES
