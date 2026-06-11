@@ -4,9 +4,11 @@
 
 **Talk, or paste a transcript — AI turns it into sticky notes and a relationship diagram on a live, multiplayer meeting whiteboard.** Self-hosted, zero licensing cost (all MIT).
 
-**[Try it](https://mori-canvas.onrender.com/) ・ [See a finished board](https://mori-canvas.onrender.com/?room=DEMO) ・ [Manual](https://yazelin.github.io/mori-canvas/) ・ [GitHub](https://github.com/yazelin/mori-canvas)**
+**[Try it](https://mori-canvas.onrender.com/) ・ [See a finished board](https://mori-canvas.onrender.com/?room=DEMO) ・ [GitHub](https://github.com/yazelin/mori-canvas)**
 
 > Live and under active development. The free demo may be buggy and sleeps when idle — you're very welcome to fork / self-host it.
+
+📖 **Full docs site (GitHub Pages): [yazelin.github.io/mori-canvas](https://yazelin.github.io/mori-canvas/)** — [Home](https://yazelin.github.io/mori-canvas/) ・ [Manual](https://yazelin.github.io/mori-canvas/guide.html) ・ [Examples](https://yazelin.github.io/mori-canvas/examples.html) ・ [Self-hosting](https://yazelin.github.io/mori-canvas/selfhost.html) ・ [FAQ](https://yazelin.github.io/mori-canvas/faq.html)
 
 ```
 meeting audio ──STT(cloud Groq / local whisper)──▶ transcript ──cleanup──▶ AI(Groq gpt-oss-120b / local qwen3)──▶ stickies + links ──yjs──▶ live multiplayer board
@@ -107,6 +109,20 @@ Custom modes **trim silence** (ffmpeg) before sending to STT, so Whisper doesn't
 ---
 
 ## Deploying / sharing
+
+**Decide first: single-user or multiplayer?** The desktop app is for **one person on their own machine** (the server runs on loopback, not exposed); for **multiple people on the same board**, run a server (Docker / install.sh / source / Render). Pick your case:
+
+| Your case | Use | Single / multi | What to install | Where data lives | Available now? |
+|---|---|---|---|---|---|
+| Just take a quick look / show a friend | [Online demo](https://mori-canvas.onrender.com/) (Render) | multi, same room | nothing, just a link | host machine (wiped) | ✅ |
+| One person on their own computer | **Desktop installer** (.msi/.exe/.dmg/.AppImage/.deb) | single | download + double-click | your computer | ⏳ needs a release |
+| Self-host for a team, fastest | **Docker one-liner** (ghcr image) | multi | Docker | your mounted volume | ⏳ needs a release |
+| Self-host, no Rust/Node | **`install.sh`** (Linux server binary) | multi | one `curl \| bash` | host `.data/` | ⏳ needs a release |
+| Any platform, developer | **Build from source** | multi | Rust + Node | host `.data/` | ✅ |
+| Host your own online instance | **Render Blueprint** | multi | a GitHub account | Render container (wiped) | ✅ |
+| Already on AgentOS | install as a **body-part** | integration | AgentOS | — | ✅ |
+
+> ⏳ "needs a release" = the code and CI are ready, but the project has to push a `v*` tag before CI produces the ghcr image / prebuilt binaries / desktop installers and attaches them to [Releases](https://github.com/yazelin/mori-canvas/releases). Until then, self-host via "build from source" or "Render Blueprint" (neither needs a release).
 
 ### 1) Demo (no install, just a link)
 
