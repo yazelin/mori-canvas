@@ -28,6 +28,26 @@
 			</div>
 		</header>
 
+		<section id="choose">
+			<div class="wrap">
+				<h2><span class="num">〇</span>選哪種部署?</h2>
+				<p>先決定<strong>單人還是多人</strong>:桌面 App 是一個人在自己電腦上用(server 跑 loopback、不對外);要多人連進同一張板就走 server(Docker / install.sh / 源碼 / Render)。</p>
+				<table>
+					<thead><tr><th>你的情況</th><th>用哪種</th><th>單人 / 多人</th><th>要裝什麼</th><th>現在可用?</th></tr></thead>
+					<tbody>
+						<tr><td>只想快速看看、給朋友玩</td><td><a href="https://mori-canvas.onrender.com/" target="_blank" rel="noreferrer">線上試玩</a></td><td>多人同房</td><td>什麼都不用,點連結</td><td>可用</td></tr>
+						<tr><td>一個人在自己電腦上用</td><td>桌面 App 安裝檔(.msi/.exe/.dmg/.AppImage/.deb)</td><td>單人</td><td>下載安裝檔雙擊</td><td>待發 release</td></tr>
+						<tr><td>團隊自架、最快</td><td>Docker 一行(ghcr image)</td><td>多人</td><td>Docker</td><td>待發 release</td></tr>
+						<tr><td>團隊自架、免 Rust/Node</td><td><code>install.sh</code>(Linux server binary)</td><td>多人</td><td>一行 <code>curl | bash</code></td><td>待發 release</td></tr>
+						<tr><td>任何平台、開發者</td><td>從源碼 build</td><td>多人</td><td>Rust + Node</td><td>可用</td></tr>
+						<tr><td>自己架一個線上版</td><td>Render Blueprint</td><td>多人</td><td>GitHub 帳號</td><td>可用</td></tr>
+						<tr><td>已經在用 AgentOS</td><td>裝成 body-part</td><td>整合</td><td>AgentOS</td><td>可用</td></tr>
+					</tbody>
+				</table>
+				<p class="lead" style="font-size:14.5px"><strong>「待發 release」</strong>= 程式碼與 CI 都備好了,但要等專案推一個 <code>v*</code> tag,CI 才會把 ghcr image / 預編譯 binary / 桌面安裝檔產出來掛上 <a href="https://github.com/yazelin/mori-canvas/releases" target="_blank" rel="noreferrer">Releases</a>。在那之前,自架請走下面的「從源碼 build」或「Render」(這兩個不需要 release)。</p>
+			</div>
+		</section>
+
 		<section id="arch">
 			<div class="wrap">
 				<h2><span class="num">一</span>架構一眼懂</h2>

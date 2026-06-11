@@ -4,9 +4,11 @@
 
 **講話 / 貼逐字稿 → AI 自動整理成便利貼 + 關係圖 → 多人即時協作的會議白板。** 自架、零授權成本(全 MIT)。
 
-**[立即試玩](https://mori-canvas.onrender.com/) ・ [先看示範板](https://mori-canvas.onrender.com/?room=DEMO) ・ [使用手冊](https://yazelin.github.io/mori-canvas/) ・ [GitHub](https://github.com/yazelin/mori-canvas)**
+**[立即試玩](https://mori-canvas.onrender.com/) ・ [先看示範板](https://mori-canvas.onrender.com/?room=DEMO) ・ [GitHub](https://github.com/yazelin/mori-canvas)**
 
 > 已上線、持續開發中。歡迎試玩(免費示範站偶有 bug、會休眠),更歡迎 fork / 自架回去自己玩。
+
+📖 **完整文件站(GitHub Pages):[yazelin.github.io/mori-canvas](https://yazelin.github.io/mori-canvas/)** —— [首頁](https://yazelin.github.io/mori-canvas/) ・ [操作手冊](https://yazelin.github.io/mori-canvas/guide.html) ・ [範例教學](https://yazelin.github.io/mori-canvas/examples.html) ・ [自架部署](https://yazelin.github.io/mori-canvas/selfhost.html) ・ [常見問題](https://yazelin.github.io/mori-canvas/faq.html)
 
 ```
 會議語音 ──STT(雲端 Groq / 本機 whisper)──▶ 逐字稿 ──清稿──▶ AI 畫卡(Groq gpt-oss-120b / 本機 qwen3)──▶ 便利貼+連線 ──yjs──▶ 多人 live 白板
@@ -107,6 +109,20 @@ npm run start:lan      # = HTTPS=1 PORT=5174 BIND=0.0.0.0 ./server-rs/target/rel
 ---
 
 ## 部署 / 給別人用
+
+**先決定:單人還是多人?** 桌面 App 是**一個人在自己電腦上用**(server 跑 loopback、不對外);要**多人連進同一張板**就走 server(Docker / install.sh / 源碼 / Render)。下表挑你的情況:
+
+| 你的情況 | 用哪種 | 單人 / 多人 | 要裝什麼 | 資料在哪 | 現在可用? |
+|---|---|---|---|---|---|
+| 只想快速看看、給朋友玩 | [線上試玩](https://mori-canvas.onrender.com/)(Render demo) | 多人同房 | 什麼都不用,點連結 | 站長機器(會清) | ✅ |
+| 一個人在自己電腦上用 | **桌面 App 安裝檔**(.msi/.exe/.dmg/.AppImage/.deb) | 單人 | 下載安裝檔雙擊 | 自己電腦 | ⏳ 待發 release |
+| 團隊自架、最快 | **Docker 一行**(ghcr image) | 多人 | Docker | 你掛的 volume | ⏳ 待發 release |
+| 團隊自架、免 Rust/Node | **`install.sh`**(Linux server binary) | 多人 | 一行 `curl \| bash` | 主機 `.data/` | ⏳ 待發 release |
+| 任何平台、開發者 | **從源碼 build** | 多人 | Rust + Node | 主機 `.data/` | ✅ |
+| 自己架一個線上版 | **Render Blueprint** | 多人 | GitHub 帳號 | Render 容器(會清) | ✅ |
+| 已經在用 AgentOS | 裝成 **body-part** | 整合 | AgentOS | — | ✅ |
+
+> ⏳「待發 release」= 程式碼與 CI 都備好了,但要等專案推一個 `v*` tag,CI 才會把 ghcr image / 預編譯 binary / 桌面安裝檔產出來掛上 [Releases](https://github.com/yazelin/mori-canvas/releases)。在那之前,自架請走「從源碼 build」或「Render Blueprint」(這兩個不需要 release)。
 
 ### 1) 試玩(免裝,點連結就玩)
 
