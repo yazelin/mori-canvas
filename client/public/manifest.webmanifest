@@ -11,6 +11,6 @@
   "icons": [
     { "src": "/icons/mori-128.png", "sizes": "128x128", "type": "image/png" },
     { "src": "/icons/mori-256.png", "sizes": "256x256", "type": "image/png", "purpose": "any" },
-    { "src": "/icons/mori-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+    { "src": "/icons/mori-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
   ]
 }
