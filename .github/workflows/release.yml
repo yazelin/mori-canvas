@@ -83,6 +83,7 @@ jobs:
         include:
           - { name: linux-x86_64, os: ubuntu-22.04 }
           - { name: windows-x86_64, os: windows-latest }
+          - { name: macos-aarch64, os: macos-latest } # Apple Silicon → .dmg/.app(未簽章,首開需 xattr 解隔離)
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
