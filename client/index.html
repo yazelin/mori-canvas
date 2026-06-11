@@ -17,9 +17,10 @@
 		<meta name="apple-mobile-web-app-status-bar-style" content="default" />
 		<meta name="apple-mobile-web-app-title" content="Mori Canvas" />
 
-		<!-- favicon / app icons -->
-		<link rel="icon" type="image/png" sizes="128x128" href="/icons/mori-128.png" />
-		<link rel="apple-touch-icon" href="/icons/mori-256.png" />
+		<!-- favicon / app icons (?v= cache-busts browsers that cached the old icon) -->
+		<link rel="icon" href="/favicon.ico" sizes="any" />
+		<link rel="icon" type="image/png" sizes="128x128" href="/icons/mori-128.png?v=2" />
+		<link rel="apple-touch-icon" href="/icons/mori-256.png?v=2" />
 
 		<!-- social preview (OG / Twitter) — og:image relative; for a LINE/FB preview to show
 		     reliably, point it at an absolute https URL once the deploy domain is known. -->
