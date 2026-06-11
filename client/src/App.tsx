@@ -2234,8 +2234,11 @@ ${boardImg}
 						className="btn-soft"
 						style={{ pointerEvents: 'auto', padding: '8px 18px', fontSize: 13 }}
 						onClick={async () => {
-							// 不用麥克風也不用打字:把內建示範逐字稿餵給 agent,看卡片自己長出來
 							if (busy === t('agent.demoThinking') || busy === t('agent.thinking')) return // 防連點重複送
+							// 先把內建示範逐字稿填進貼稿面板並展開,讓使用者看到 AI 要處理的「輸入」長怎樣,再餵給 agent
+							setPanelOpen(true)
+							setShowPaste(true)
+							setAgentText(t('demo.transcript'))
 							setBusy(t('agent.demoThinking'))
 							try {
 								const r = await fetch(`${SYNC_HTTP}/api/agent/${encodeURIComponent(room)}`, {
