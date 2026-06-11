@@ -128,7 +128,9 @@ npm run start:lan      # = HTTPS=1 PORT=5174 BIND=0.0.0.0 ./server-rs/target/rel
 
 ### 1) 試玩(免裝,點連結就玩)
 
-社群試玩版部署在 Render:[mori-canvas.onrender.com](https://mori-canvas.onrender.com/)。朋友點開掃 QR 就進。想花十秒看「長好的板」,直接開[示範板](https://mori-canvas.onrender.com/?room=DEMO)(每小時自動重置)。AI 走站長的 Groq key(有 per-IP 限流);想用自己的額度可在 ⚙ 設定 → BYO 填任何 OpenAI 相容的 base/key/model,或直接貼逐字稿。
+社群試玩版部署在 Render:[mori-canvas.onrender.com](https://mori-canvas.onrender.com/)。朋友點開掃 QR 就進。想花十秒看「長好的板」,直接開[示範板](https://mori-canvas.onrender.com/?room=DEMO)(每小時自動重置)。
+
+> **試用原則**:試玩站是讓你**體驗一下**,不是長期免費公益 —— AI 走站長的共用額度,有每日上限、人多會限流。要正式用,兩條路都免費:**自架一份**(全開源,資料留在你機器上),或在 ⚙ 設定填**自己的免費 Groq key**(BYO,不受站長限流)。BYO 可填任何 OpenAI 相容的 base/key/model,或直接貼逐字稿。
 
 **自己部署到 Render(GitHub-driven):** render.com → GitHub 登入 → New + → Blueprint → 選 repo(自動讀 `render.yaml`)→ Environment 填 `GROQ_API_KEY` 與 `ADMIN_TOKEN`(見下方安全)→ Deploy。之後每次 `git push` 自動重部署。免費方案閒置 15 分鐘休眠(首次再進等 ~30-60 秒冷啟動)。
 
@@ -174,7 +176,7 @@ GitHub Releases 有 `.msi`/`.exe`(Windows)、`.AppImage`/`.deb`(Linux),雙擊安
 - **`LLM_LOCAL_ONLY=1`**:開機鎖定本機模式 —— AI 只走本機 Ollama、雲端 STT 與訪客 BYO 端點一律封鎖、設定頁/API 都關不掉(資料不出網)。
 - **唯讀分享 + 房主鎖板**:分享面板可「複製唯讀連結」(`?view=1`,打開的人只能看);建房的第一個人是房主,可「鎖定白板」讓其他人變唯讀。兩者都是 **server 在 ws 層丟棄無權連線的寫入**,不是純 UI 隱藏。
 - **BYO key 只存自己瀏覽器**:訪客在設定頁貼的 Groq key 走 BYO header、隨請求帶上,不會變成全 server 共用、訪客之間也蓋不掉。
-- **demo 站治理**:`DEMO_RATE_PER_MIN`(per-IP 限流,超限回 429 + Retry-After)、`ROOM_TTL_HOURS`(閒置房自動清,demo 設 72h)、`MAX_ROOMS`(房數上限)、`PUBLIC_ROOM_LIST=0`(房間清單只回數量、不洩房號)。詳見 `.env.example`。
+- **demo 站治理 / 預算保護**:`DEMO_AI_DAILY_LIMIT`(全域每日共用-key AI 呼叫上限,滿了回友善訊息請訪客自備 key,**BYO 不受限**)、`DEMO_RATE_PER_MIN`(per-IP 限流,超限回 429 + Retry-After)、`ROOM_TTL_HOURS`(閒置房自動清)、`MAX_ROOMS`(同時房數上限,也間接框住 AI 量)、`PUBLIC_ROOM_LIST=0`(房間清單只回數量、不洩房號)。硬上限請另在 Groq 帳號設 spending limit。詳見 `.env.example`。
 
 ---
 

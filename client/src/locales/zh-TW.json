@@ -191,7 +191,7 @@
 		"groqKeyOn": "✓ 已啟用",
 		"groqKeyOnBrowser": "✓ 已啟用(此瀏覽器)",
 		"groqKeyNeeded": "（雲端 AI 需要）",
-		"groqKeyDesc": "貼上你的 Groq key（console.groq.com/keys）:只存在你瀏覽器,AI 畫卡/摘要逐次請求帶上、走你自己的額度,訪客之間不共用。",
+		"groqKeyDesc": "貼上你的 Groq key（console.groq.com/keys）:只存在你瀏覽器,AI 畫卡/摘要逐次請求帶上、走你自己的額度,訪客之間不共用。試用站的共用額度有每日上限、人多會限流;填自己的免費 key 就不受限。想長期用,這是開源的,歡迎自己部署一份。",
 		"groqKeyLockedNote": "注意:語音辨識(STT)仍走站長的 STT 設定,你的 key 不會用於語音辨識。",
 		"groqKeyLocalNote": "單機自用時 key 會同步給本機 server,雲端語音辨識也能用。",
 		"stt": "語音轉文字(Whisper)",

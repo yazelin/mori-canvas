@@ -192,7 +192,7 @@
 		"groqKeyOn": "✓ active",
 		"groqKeyOnBrowser": "✓ active (this browser)",
 		"groqKeyNeeded": " (needed for cloud AI)",
-		"groqKeyDesc": "Paste your Groq key (console.groq.com/keys). It stays in this browser only and is sent per request, so AI cards/summaries use your own quota — never shared between visitors.",
+		"groqKeyDesc": "Paste your Groq key (console.groq.com/keys). It stays in this browser only and is sent per request, so AI cards/summaries use your own quota — never shared between visitors. The public demo's shared quota has a daily cap and throttles under load; your own free key is never capped. For ongoing use it's open source — self-host your own.",
 		"groqKeyLockedNote": "Note: speech-to-text still uses the host's STT settings; your key is not used for transcription.",
 		"groqKeyLocalNote": "On a single-machine setup the key also syncs to the local server, so cloud transcription works too.",
 		"stt": "Speech-to-text (Whisper)",
