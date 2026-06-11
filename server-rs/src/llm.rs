@@ -358,6 +358,46 @@ fn pick_route(local_only: bool, has_byo: bool) -> Route {
     }
 }
 
+// ── demo 共用 key 的每日 AI 上限:保護站長的 Groq 預算。只擋 Cascade(用站長共用 key);
+// 訪客自備 key(Byo)與本機模式(LocalOnly)完全不受限。DEMO_AI_DAILY_LIMIT 未設或 0 = 不限。
+fn demo_ai_daily_limit() -> Option<u64> {
+    std::env::var("DEMO_AI_DAILY_LIMIT")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .filter(|n| *n > 0)
+}
+/// 純函數供測試:今天已用 count 次、上限 limit,還能不能再呼叫一次共用 key。
+fn within_daily_cap(count: u64, limit: Option<u64>) -> bool {
+    match limit {
+        None => true,
+        Some(l) => count < l,
+    }
+}
+static AI_DAY: std::sync::Mutex<(u64, u64)> = std::sync::Mutex::new((0, 0)); // (utc_day, count)
+fn utc_day() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() / 86400)
+        .unwrap_or(0)
+}
+/// 記一次共用 key 呼叫;回 true=放行(已計入今日),false=今日額度已滿。跨 UTC 日界線自動歸零。
+fn record_shared_key_call() -> bool {
+    let limit = demo_ai_daily_limit();
+    let mut g = AI_DAY.lock().unwrap_or_else(|e| e.into_inner());
+    let today = utc_day();
+    if g.0 != today {
+        *g = (today, 0);
+    }
+    if !within_daily_cap(g.1, limit) {
+        return false;
+    }
+    g.1 += 1;
+    true
+}
+/// 額度用完時回給使用者的友善訊息(端點直接顯示在 error 欄)。
+const AI_CAP_MSG: &str =
+    "今天的試用 AI 額度已用完。想繼續用,在設定填自己的免費 Groq key(console.groq.com),或自行部署一份(全開源)。";
+
 async fn chat_raw(
     messages: &[Msg],
     json_mode: bool,
@@ -381,15 +421,21 @@ async fn chat_raw(
                 format!("byo:{}", model),
             ))
         }
-        Route::Cascade => match call_groq(messages, json_mode).await {
-            Ok(t) => Ok((t, "groq:gpt-oss-120b".into())),
-            Err(ge) => match call_ollama(messages, json_mode).await {
-                Ok(t) => Ok((t, "ollama".into())),
-                Err(oe) => Err(format!(
-                    "both LLM providers failed — groq: {ge}; ollama: {oe}"
-                )),
-            },
-        },
+        Route::Cascade => {
+            // 共用 key 每日額度:滿了直接擋,連 Groq/Ollama 都不打(不花站長的錢),回友善訊息
+            if !record_shared_key_call() {
+                return Err(AI_CAP_MSG.to_string());
+            }
+            match call_groq(messages, json_mode).await {
+                Ok(t) => Ok((t, "groq:gpt-oss-120b".into())),
+                Err(ge) => match call_ollama(messages, json_mode).await {
+                    Ok(t) => Ok((t, "ollama".into())),
+                    Err(oe) => Err(format!(
+                        "both LLM providers failed — groq: {ge}; ollama: {oe}"
+                    )),
+                },
+            }
+        }
     }
 }
 
@@ -410,6 +456,19 @@ mod tests {
         // 非本機模式:BYO 照常優先,沒 BYO 走 Groq -> Ollama 串接
         assert_eq!(pick_route(false, true), Route::Byo);
         assert_eq!(pick_route(false, false), Route::Cascade);
+    }
+
+    #[test]
+    fn daily_cap_allows_until_limit_then_blocks() {
+        use super::within_daily_cap;
+        // 未設上限(None)=> 永遠放行
+        assert!(within_daily_cap(0, None));
+        assert!(within_daily_cap(999_999, None));
+        // 上限 100:0..99 放行,100 起擋(count 是「已用」次數)
+        assert!(within_daily_cap(0, Some(100)));
+        assert!(within_daily_cap(99, Some(100)));
+        assert!(!within_daily_cap(100, Some(100)));
+        assert!(!within_daily_cap(101, Some(100)));
     }
 
     #[test]
