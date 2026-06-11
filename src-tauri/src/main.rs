@@ -1,4 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+// 同 server-rs:此 bin 也會編譯 mori-canvas-server 的 warp filter 鏈(serve()),
+// 巨型嵌套型別需要更高遞迴上限,否則桌面 build 撞 E0275(server bin 已加、這裡先前漏了)
+#![recursion_limit = "256"]
 //! Mori Canvas desktop (Tauri 2). Embeds the mori-canvas-server (one binary), runs it
 //! on a loopback port, and loads that URL in the webview so the client's same-origin
 //! /api + /sync reach the embedded server. Self-registers as a mori-desktop body part.
