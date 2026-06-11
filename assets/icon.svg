@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   viewBox="0 0 512 512"
+   version="1.1"
+   id="svg6"
+   sodipodi:docname="mori-icon-可編輯.svg"
+   inkscape:version="1.4.4 (dcaf3e7d9e, 2026-05-05)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     id="namedview6"
+     pagecolor="#ffffff"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:zoom="1.7304688"
+     inkscape:cx="256"
+     inkscape:cy="255.71106"
+     inkscape:window-width="2560"
+     inkscape:window-height="1371"
+     inkscape:window-x="3360"
+     inkscape:window-y="651"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="bubble" />
+  <defs
+     id="defs2">
+    <inkscape:path-effect
+       effect="fillet_chamfer"
+       id="path-effect6"
+       is_visible="true"
+       lpeversion="1"
+       nodesatellites_param="F,0,0,1,0,0,0,1 @ F,0,0,1,0,0,0,1 @ F,0,0,1,0,0,0,1 @ F,0,0,1,0,0,0,1 @ F,0,0,1,0,0,0,1 @ F,0,0,1,0,0,0,1 @ F,0,0,1,0,36.430029,0,1 @ F,0,0,1,0,0,0,1 @ F,0,0,1,0,0,0,1 @ F,0,0,1,0,0,0,1 @ F,0,0,1,0,0,0,1"
+       radius="0"
+       unit="px"
+       method="auto"
+       mode="F"
+       chamfer_steps="1"
+       flexible="false"
+       use_knot_distance="true"
+       apply_no_radius="true"
+       apply_with_radius="true"
+       only_selected="false"
+       hide_knots="false" />
+    <linearGradient
+       id="bg"
+       x1="0"
+       y1="0"
+       x2="0"
+       y2="1">
+      <stop
+         offset="0"
+         stop-color="#f6f1e6"
+         id="stop1" />
+      <stop
+         offset="1"
+         stop-color="#ece4d3"
+         id="stop2" />
+    </linearGradient>
+  </defs>
+  
+  <g
+     id="bubble"
+     transform="translate(256 256) scale(1.18) translate(-256 -240)">
+    <g
+       id="g7"
+       transform="translate(0,15.254237)">
+      <path
+         d="m 120,74 h 272 c 30.66667,0 46,15.333333 46,46 v 184 c 0,30.66667 -15.33333,46 -46,46 H 277.52542 l -42.27987,39.10085 A 19.182053,19.182053 19.468214 0 1 203.24046,377.78723 L 199.18644,350 H 120 C 89.333333,350 74,334.66667 74,304 V 120 C 74,89.333333 89.333333,74 120,74 Z"
+         fill="#ffffff"
+         stroke="#25324a"
+         stroke-width="22"
+         stroke-linejoin="round"
+         id="path2"
+         sodipodi:nodetypes="ssssscccssss"
+         inkscape:path-effect="#path-effect6"
+         inkscape:original-d="m 120,74 h 272 c 30.66667,0 46,15.333333 46,46 v 184 c 0,30.66667 -15.33333,46 -46,46 H 277.52542 L 208.49975,413.83563 199.18644,350 H 120 C 89.333333,350 74,334.66667 74,304 V 120 C 74,89.333333 89.333333,74 120,74 Z"
+         transform="translate(0,1.6949153)" />
+      <rect
+         x="87.764137"
+         y="111.05814"
+         width="110"
+         height="110"
+         rx="20"
+         fill="#f3c63e"
+         transform="rotate(-4)"
+         id="rect2" />
+      <rect
+         x="312.70963"
+         y="71.352577"
+         width="110"
+         height="110"
+         rx="20"
+         fill="#4f95e6"
+         transform="rotate(4)"
+         id="rect3" />
+      <rect
+         x="192.36203"
+         y="226.46368"
+         width="108"
+         height="108"
+         rx="20"
+         fill="#57b65a"
+         transform="rotate(-2)"
+         id="rect4" />
+      <g
+         fill="none"
+         stroke="#25324a"
+         stroke-width="16"
+         stroke-linecap="round"
+         stroke-linejoin="round"
+         id="g6"
+         transform="translate(0,1.6949153)">
+        <line
+           x1="222"
+           y1="150"
+           x2="288"
+           y2="150"
+           id="line4" />
+        <path
+           d="m 137.26709,236.24655 q 0,38 36,38"
+           id="path4" />
+        <path
+           d="m 337.548,288.40755 q 30,-8 30,-50"
+           id="path5" />
+        <path
+           d="m 358.07882,244.04109 8,-14 8,14"
+           id="path6" />
+      </g>
+    </g>
+  </g>
+</svg>
