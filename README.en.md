@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/logo.png" width="116" alt="Mori Canvas"></p>
+
 # Mori Canvas
 
 > Language: [繁體中文](README.md) ・ **English**
@@ -115,14 +117,14 @@ Custom modes **trim silence** (ffmpeg) before sending to STT, so Whisper doesn't
 | Your case | Use | Single / multi | What to install | Where data lives | Available now? |
 |---|---|---|---|---|---|
 | Just take a quick look / show a friend | [Online demo](https://mori-canvas.onrender.com/) (Render) | multi, same room | nothing, just a link | host machine (wiped) | ✅ |
-| One person on their own computer | **Desktop installer** (.msi/.exe/.dmg/.AppImage/.deb) | single | download + double-click | your computer | ⏳ needs a release |
-| Self-host for a team, fastest | **Docker one-liner** (ghcr image) | multi | Docker | your mounted volume | ⏳ needs a release |
-| Self-host, no Rust/Node | **`install.sh`** (Linux server binary) | multi | one `curl \| bash` | host `.data/` | ⏳ needs a release |
+| One person on their own computer | **Desktop installer** (.msi/.exe/.dmg/.AppImage/.deb) | single | download + double-click | your computer | ✅ |
+| Self-host for a team, fastest | **Docker one-liner** (ghcr image) | multi | Docker | your mounted volume | ✅ |
+| Self-host, no Rust/Node | **`install.sh`** (Linux server binary) | multi | one `curl \| bash` | host `.data/` | ✅ |
 | Any platform, developer | **Build from source** | multi | Rust + Node | host `.data/` | ✅ |
 | Host your own online instance | **Render Blueprint** | multi | a GitHub account | Render container (wiped) | ✅ |
 | Already on AgentOS | install as a **body-part** | integration | AgentOS | — | ✅ |
 
-> ⏳ "needs a release" = the code and CI are ready, but the project has to push a `v*` tag before CI produces the ghcr image / prebuilt binaries / desktop installers and attaches them to [Releases](https://github.com/yazelin/mori-canvas/releases). Until then, self-host via "build from source" or "Render Blueprint" (neither needs a release).
+> **v0.1.0 is out**: the ghcr image, prebuilt server binaries for every platform, and desktop installers (.msi/.exe/.dmg/.AppImage/.deb/.rpm) are all attached to [Releases](https://github.com/yazelin/mori-canvas/releases/tag/v0.1.0) — every row above works right now. Pushing a new `v*` tag refreshes these artifacts automatically.
 
 ### 1) Demo (no install, just a link)
 
@@ -132,7 +134,7 @@ The community demo runs on Render: [mori-canvas.onrender.com](https://mori-canva
 
 ### 2) Run the server yourself (for a team / self-host)
 
-**Fastest — Docker one-liner** (the image is published to ghcr by CI on a `v*` tag):
+**Fastest — Docker one-liner** (the image is published to ghcr, refreshed on each `v*` tag):
 ```bash
 docker run -p 1334:1334 -v "$PWD/data:/app/.data" -e GROQ_API_KEY=gsk_xxx ghcr.io/yazelin/mori-canvas
 ```
@@ -145,7 +147,7 @@ mori-canvas-server                    # defaults to http://0.0.0.0:1334
 ```
 Installs to `~/.local/share/mori-canvas/`, symlinks the command into `~/.local/bin/`; re-run to upgrade. macOS / Windows: grab the matching server bundle from [Releases](https://github.com/yazelin/mori-canvas/releases).
 
-> The Docker image, prebuilt binaries and desktop installers are produced by CI **only when a `v*` tag is pushed**; until a tag is published, use "build from source" below.
+> The Docker image, prebuilt binaries and desktop installers ship with **v0.1.0** on [Releases](https://github.com/yazelin/mori-canvas/releases) and refresh on each new `v*` tag; to run unreleased `main`, use "build from source" below.
 
 **Build from source:**
 ```bash
@@ -261,7 +263,7 @@ Docs site (`docs/`, GitHub Pages): five pages — landing / manual / examples / 
 3. **Mobile recording needs HTTPS**: `http://<lan-ip>` is an insecure origin and browsers block `getUserMedia` — hence the LAN self-signed HTTPS.
 4. **agent JSON**: gpt-oss/qwen3 wrap output in `<think>` / fences — strip them before taking the outer `{...}`; set `think:false` for qwen3; use `{from,to}` for connectors, not `[[a,b]]`.
 5. **A reverse proxy makes visitors look like local admins**: Render / same-host nginx connect over loopback, so checking only "is the socket loopback" treats the whole world as admin. "Truly local" = loopback **and no `X-Forwarded-For`** (XFF means it came through a proxy). Any "loopback = trusted" check behind a PaaS / proxy must also require no XFF.
-6. **Deeper warp filter chains need `#![recursion_limit = "256"]`** (in both lib and bin), or the giant nested types blow the recursion limit.
+6. **Deeper warp filter chains need `#![recursion_limit = "256"]`** (in server-rs's lib and bin, *and* in `src-tauri` which embeds the same routes — the desktop build only runs on a tag, so a miss only blows up on the first release), or the giant nested types blow the recursion limit.
 7. **Docker build missing a COPY of the seed**: the DEMO room seed is `include_str!`-ed from `client/public/examples`; the server build stage missing that COPY fails every Render build.
 8. **i18n output language**: an English directive only at the end of the system prompt gets diluted by the surrounding Chinese instructions (the model translates titles but leaves cards Chinese); strengthen the wording and also prepend an English directive to the user message.
 9. **Restart loses data**: writes are debounced — flush on SIGTERM/SIGINT (done).

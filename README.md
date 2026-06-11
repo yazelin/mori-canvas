@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/logo.png" width="116" alt="Mori Canvas"></p>
+
 # Mori Canvas
 
 > 語言:**繁體中文** ・ [English](README.en.md)
@@ -115,14 +117,14 @@ npm run start:lan      # = HTTPS=1 PORT=5174 BIND=0.0.0.0 ./server-rs/target/rel
 | 你的情況 | 用哪種 | 單人 / 多人 | 要裝什麼 | 資料在哪 | 現在可用? |
 |---|---|---|---|---|---|
 | 只想快速看看、給朋友玩 | [線上試玩](https://mori-canvas.onrender.com/)(Render demo) | 多人同房 | 什麼都不用,點連結 | 站長機器(會清) | ✅ |
-| 一個人在自己電腦上用 | **桌面 App 安裝檔**(.msi/.exe/.dmg/.AppImage/.deb) | 單人 | 下載安裝檔雙擊 | 自己電腦 | ⏳ 待發 release |
-| 團隊自架、最快 | **Docker 一行**(ghcr image) | 多人 | Docker | 你掛的 volume | ⏳ 待發 release |
-| 團隊自架、免 Rust/Node | **`install.sh`**(Linux server binary) | 多人 | 一行 `curl \| bash` | 主機 `.data/` | ⏳ 待發 release |
+| 一個人在自己電腦上用 | **桌面 App 安裝檔**(.msi/.exe/.dmg/.AppImage/.deb) | 單人 | 下載安裝檔雙擊 | 自己電腦 | ✅ |
+| 團隊自架、最快 | **Docker 一行**(ghcr image) | 多人 | Docker | 你掛的 volume | ✅ |
+| 團隊自架、免 Rust/Node | **`install.sh`**(Linux server binary) | 多人 | 一行 `curl \| bash` | 主機 `.data/` | ✅ |
 | 任何平台、開發者 | **從源碼 build** | 多人 | Rust + Node | 主機 `.data/` | ✅ |
 | 自己架一個線上版 | **Render Blueprint** | 多人 | GitHub 帳號 | Render 容器(會清) | ✅ |
 | 已經在用 AgentOS | 裝成 **body-part** | 整合 | AgentOS | — | ✅ |
 
-> ⏳「待發 release」= 程式碼與 CI 都備好了,但要等專案推一個 `v*` tag,CI 才會把 ghcr image / 預編譯 binary / 桌面安裝檔產出來掛上 [Releases](https://github.com/yazelin/mori-canvas/releases)。在那之前,自架請走「從源碼 build」或「Render Blueprint」(這兩個不需要 release)。
+> **v0.1.0 已發行**:ghcr image、各平台預編譯 server binary、桌面安裝檔(.msi/.exe/.dmg/.AppImage/.deb/.rpm)都已掛上 [Releases](https://github.com/yazelin/mori-canvas/releases/tag/v0.1.0),上表全部直接可用。之後推新的 `v*` tag,CI 會自動更新這些產物。
 
 ### 1) 試玩(免裝,點連結就玩)
 
@@ -132,7 +134,7 @@ npm run start:lan      # = HTTPS=1 PORT=5174 BIND=0.0.0.0 ./server-rs/target/rel
 
 ### 2) 自己跑 server(給團隊、想自架)
 
-**最快:Docker 一行**(image 在打 `v*` tag 時由 CI 發佈到 ghcr):
+**最快:Docker 一行**(image 已發佈到 ghcr,隨 `v*` tag 自動更新):
 ```bash
 docker run -p 1334:1334 -v "$PWD/data:/app/.data" -e GROQ_API_KEY=gsk_xxx ghcr.io/yazelin/mori-canvas
 ```
@@ -145,7 +147,7 @@ mori-canvas-server                    # 預設 http://0.0.0.0:1334
 ```
 裝到 `~/.local/share/mori-canvas/`、指令 symlink 在 `~/.local/bin/`;重跑即升級。macOS / Windows 到 [Releases](https://github.com/yazelin/mori-canvas/releases) 抓對應 server 包。
 
-> Docker image、預編譯安裝檔與桌面安裝檔都由 CI 在**打 `v*` tag 時**才產出;尚未發佈 tag 前請走下面「從源碼 build」。
+> 以上 Docker image、預編譯 binary 與桌面安裝檔都已隨 **v0.1.0** 掛上 [Releases](https://github.com/yazelin/mori-canvas/releases);之後推新 `v*` tag,CI 會自動更新。想跑未發佈的最新 main,走下面「從源碼 build」。
 
 **從源碼 build:**
 ```bash
@@ -261,7 +263,7 @@ UI 支援**繁體中文(zh-TW)與 English**:第一次依瀏覽器語言自動偵
 3. **手機錄音要 HTTPS**:`http://<區網IP>` 是不安全來源,瀏覽器擋 `getUserMedia` —— 所以才有區網版的自簽 HTTPS。
 4. **agent JSON**:gpt-oss/qwen3 會夾 `<think>`/圍欄,要先剝再取外層 `{...}`;qwen3 記得 `think:false`;connector 用 `{from,to}` 別用 `[[a,b]]`。
 5. **反向代理把訪客當本機管理員**:Render / 同主機 nginx 是用 loopback 連到 app,只看 socket 是不是 loopback 會把全世界當管理員。判斷「真本機」要 loopback **且無 `X-Forwarded-For`**(帶 XFF = 經過 proxy)。任何「loopback=信任」的判斷在 PaaS / 反代後面都要再要求無 XFF。
-6. **warp filter 鏈加深要 `#![recursion_limit = "256"]`**(lib + bin 都要),否則巨型嵌套型別爆遞迴上限。
+6. **warp filter 鏈加深要 `#![recursion_limit = "256"]`**(server-rs 的 lib + bin、以及內嵌同一套路由的 `src-tauri` 都要;桌面 build 只在打 tag 時跑,漏掉會在第一次發 release 才爆),否則巨型嵌套型別爆遞迴上限。
 7. **Docker build 漏 COPY 種子檔**:DEMO 房種子是 `include_str!` 讀 `client/public/examples`,server build stage 漏 COPY 會讓每次 Render 部署 build fail。
 8. **i18n 輸出語言**:只在 system prompt 尾端附英文指令會被前面大量中文指示稀釋(模型只翻標題、卡片仍中文);要強化措辭 + 在 user message 開頭也壓一行英文指令。
 9. **server 重啟丟資料**:debounce 寫盤,要 SIGTERM/SIGINT flush(已做)。
