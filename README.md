@@ -4,11 +4,11 @@
 
 **講話 / 貼逐字稿 → AI 自動整理成便利貼 + 關係圖 → 多人即時協作的會議白板。** 自架、零授權成本(全 MIT)。
 
-**[立即試玩](https://mori-canvas.onrender.com/) ・ [先看示範板](https://mori-canvas.onrender.com/?room=DEMO) ・ [GitHub](https://github.com/yazelin/mori-canvas)**
+**[立即試玩](https://mori-canvas.onrender.com/) ・ [先看示範板](https://mori-canvas.onrender.com/?room=DEMO) ・ [GitHub](https://github.com/yazelin/mori-canvas) ・ [請我喝咖啡](https://buymeacoffee.com/yazelin)**
 
-> 已上線、持續開發中。歡迎試玩(免費示範站偶有 bug、會休眠),更歡迎 fork / 自架回去自己玩。
+> 已上線、持續開發中。歡迎試玩(免費示範站偶有 bug、會休眠),更歡迎 fork / 自架回去自己玩。覺得好用可以[請我喝杯咖啡](https://buymeacoffee.com/yazelin)。
 
-📖 **完整文件站(GitHub Pages):[yazelin.github.io/mori-canvas](https://yazelin.github.io/mori-canvas/)** —— [首頁](https://yazelin.github.io/mori-canvas/) ・ [操作手冊](https://yazelin.github.io/mori-canvas/guide.html) ・ [範例教學](https://yazelin.github.io/mori-canvas/examples.html) ・ [自架部署](https://yazelin.github.io/mori-canvas/selfhost.html) ・ [常見問題](https://yazelin.github.io/mori-canvas/faq.html)
+**完整文件站(GitHub Pages):[yazelin.github.io/mori-canvas](https://yazelin.github.io/mori-canvas/)** —— [首頁](https://yazelin.github.io/mori-canvas/) ・ [操作手冊](https://yazelin.github.io/mori-canvas/guide.html) ・ [範例教學](https://yazelin.github.io/mori-canvas/examples.html) ・ [自架部署](https://yazelin.github.io/mori-canvas/selfhost.html) ・ [常見問題](https://yazelin.github.io/mori-canvas/faq.html)
 
 ```
 會議語音 ──STT(雲端 Groq / 本機 whisper)──▶ 逐字稿 ──清稿──▶ AI 畫卡(Groq gpt-oss-120b / 本機 qwen3)──▶ 便利貼+連線 ──yjs──▶ 多人 live 白板

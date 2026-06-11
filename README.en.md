@@ -4,11 +4,11 @@
 
 **Talk, or paste a transcript — AI turns it into sticky notes and a relationship diagram on a live, multiplayer meeting whiteboard.** Self-hosted, zero licensing cost (all MIT).
 
-**[Try it](https://mori-canvas.onrender.com/) ・ [See a finished board](https://mori-canvas.onrender.com/?room=DEMO) ・ [GitHub](https://github.com/yazelin/mori-canvas)**
+**[Try it](https://mori-canvas.onrender.com/) ・ [See a finished board](https://mori-canvas.onrender.com/?room=DEMO) ・ [GitHub](https://github.com/yazelin/mori-canvas) ・ [Buy me a coffee](https://buymeacoffee.com/yazelin)**
 
-> Live and under active development. The free demo may be buggy and sleeps when idle — you're very welcome to fork / self-host it.
+> Live and under active development. The free demo may be buggy and sleeps when idle — you're very welcome to fork / self-host it. If it's useful, you can [buy me a coffee](https://buymeacoffee.com/yazelin).
 
-📖 **Full docs site (GitHub Pages): [yazelin.github.io/mori-canvas](https://yazelin.github.io/mori-canvas/)** — [Home](https://yazelin.github.io/mori-canvas/) ・ [Manual](https://yazelin.github.io/mori-canvas/guide.html) ・ [Examples](https://yazelin.github.io/mori-canvas/examples.html) ・ [Self-hosting](https://yazelin.github.io/mori-canvas/selfhost.html) ・ [FAQ](https://yazelin.github.io/mori-canvas/faq.html)
+**Full docs site (GitHub Pages): [yazelin.github.io/mori-canvas](https://yazelin.github.io/mori-canvas/)** — [Home](https://yazelin.github.io/mori-canvas/) ・ [Manual](https://yazelin.github.io/mori-canvas/guide.html) ・ [Examples](https://yazelin.github.io/mori-canvas/examples.html) ・ [Self-hosting](https://yazelin.github.io/mori-canvas/selfhost.html) ・ [FAQ](https://yazelin.github.io/mori-canvas/faq.html)
 
 ```
 meeting audio ──STT(cloud Groq / local whisper)──▶ transcript ──cleanup──▶ AI(Groq gpt-oss-120b / local qwen3)──▶ stickies + links ──yjs──▶ live multiplayer board
