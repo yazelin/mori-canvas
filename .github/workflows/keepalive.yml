@@ -5,6 +5,9 @@ on:
   schedule:
     - cron: '*/10 * * * *'
   workflow_dispatch:
+# GitHub 會在 repo 60 天沒活動時停用排程。每次執行順手呼叫 enable，讓排程不會被停（需要 actions: write）。
+permissions:
+  actions: write
 jobs:
   ping:
     runs-on: ubuntu-latest
@@ -13,3 +16,7 @@ jobs:
         run: |
           curl -sS -m 60 -o /dev/null -w "demo %{http_code} in %{time_total}s\n" \
             https://mori-canvas.onrender.com/api/health || echo "ping failed (non-fatal)"
+      - name: 重新啟用自己，避免 60 天沒活動被停用
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/keepalive.yml/enable" || echo "enable failed (non-fatal)"
