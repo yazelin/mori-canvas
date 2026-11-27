@@ -3,7 +3,7 @@
 # (include_dir) and serves client + /api + /sync on one port. For Render etc.
 
 # 1) build the React/Konva client -> client/dist
-FROM node:20-slim AS client
+FROM node:24-slim AS client
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci

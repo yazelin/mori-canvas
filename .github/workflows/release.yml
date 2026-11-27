@@ -32,7 +32,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: 20 }
+        with: { node-version: 24 }
       - run: npm ci
       - run: npm run build:client # 產 client/dist 供 binary 內嵌
       - uses: dtolnay/rust-toolchain@stable
@@ -87,7 +87,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: 20 }
+        with: { node-version: 24 }
       - run: npm ci # beforeBuildCommand (npm run build:client) 需要 node_modules
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
